@@ -106,5 +106,4 @@ web/shell/node_modules/
 # Web packer segment cache (content-hash -> compressed segment)
 web/.pack-cache/
 web/.venv/
-web
-gamedata
+web/gamedata
