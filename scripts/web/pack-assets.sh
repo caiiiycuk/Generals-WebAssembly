@@ -76,7 +76,21 @@ fi
 # Pack into single .data file (+ build.data.meta.json for resumable downloads).
 # Segment cache lives outside dist so it is never uploaded to a host.
 echo "==> Packing…"
+# Python resolution: GX_PYTHON override > repo venv (web/.venv) > system python3.
+PYTHON="${GX_PYTHON:-}"
+if [ -z "$PYTHON" ] && [ -x "$REPO_ROOT/web/.venv/bin/python3" ]; then
+    PYTHON="$REPO_ROOT/web/.venv/bin/python3"
+fi
+if [ -z "$PYTHON" ]; then
+    PYTHON="$(command -v python3.11 || command -v python3)"
+fi
+if ! "$PYTHON" -c 'import brotli' 2>/dev/null; then
+    echo "ERROR: $PYTHON lacks the 'brotli' module. Create a venv:" >&2
+    echo "  python3 -m venv web/.venv && web/.venv/bin/pip install brotli" >&2
+    exit 1
+fi
+
 GX_PACK_CACHE="$REPO_ROOT/web/.pack-cache" \
-/opt/homebrew/bin/python3.11 "$REPO_ROOT/scripts/web/packer.py" "$WORK/files" "$OUTDIR/build.data"
+"$PYTHON" "$REPO_ROOT/scripts/web/packer.py" "$WORK/files" "$OUTDIR/build.data"
 
 echo "==> Done: $OUTDIR/build.data"

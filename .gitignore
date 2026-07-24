@@ -6,6 +6,9 @@
 !.github
 !.devin
 !.gitmodules
+!.claude
+!.codegraph
+.claude/settings.local.json
 
 *.user
 *.ncb
@@ -48,10 +51,6 @@ thumbs.db
 .clang-format
 /Dependencies/MaxSDK/maxsdk
 /tmp/
-
-## AI assistant config (user-specific)
-/.claude/
-/CLAUDE.md
 
 ## IntelliJ, CLion, etc.
 /.idea
@@ -106,3 +105,4 @@ web/shell/node_modules/
 
 # Web packer segment cache (content-hash -> compressed segment)
 web/.pack-cache/
+web/.venv/
