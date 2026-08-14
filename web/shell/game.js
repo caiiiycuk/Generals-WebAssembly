@@ -11,10 +11,23 @@
 // buildId, so gxStartGame() instantiates without any further network fetch.
 window.gxEngine = { wasmBinary: null, buildId: 'dev' };
 
-// Stage 1 (after Play, before resources): download GeneralsXZH.wasm into memory
-// with progress. Emscripten later instantiates from Module.wasmBinary, so the
-// engine never fetches the wasm itself (works on any static host, one place to
-// show progress). onProgress(received, total).
+// Which engine to run, from the URL: ?game=generals -> base Generals
+// (GeneralsX.js/.wasm), anything else -> Zero Hour (GeneralsXZH.js/.wasm).
+function gxEngineName() {
+  const game = new URLSearchParams(location.search).get('game');
+  return game === 'generals' ? 'GeneralsX' : 'GeneralsXZH';
+}
+
+// Render FPS limit from the URL (?fps=60); the engine's original rate is 30.
+function gxFpsParam() {
+  const fps = parseInt(new URLSearchParams(location.search).get('fps') || '30', 10);
+  return fps > 0 ? fps : 30;
+}
+
+// Download the engine wasm into memory with progress. Emscripten later
+// instantiates from Module.wasmBinary, so the engine never fetches the wasm
+// itself (works on any static host, one place to show progress).
+// onProgress(received, total).
 async function gxPreloadEngine(onProgress) {
   let buildId = 'dev';
   try {
@@ -23,7 +36,7 @@ async function gxPreloadEngine(onProgress) {
   } catch {}
   window.gxEngine.buildId = buildId;
 
-  const resp = await fetch('GeneralsXZH.wasm?v=' + buildId);
+  const resp = await fetch(gxEngineName() + '.wasm?v=' + buildId);
   // GeneralsX @feature Lolendor 22/07/2026 Localize launch-screen engine errors.
   if (!resp.ok) throw new Error(window.gxI18n.t('error.engineHttp', { status: resp.status }));
   const total = parseInt(resp.headers.get('Content-Length') || '0') || 0;
@@ -49,11 +62,11 @@ function gxGameArguments() {
   const p = new URLSearchParams(location.search);
   const raw = p.get('args');
   const args = raw ? raw.split(' ').filter(Boolean) : [];
-  // Loader settings (index.html #gx-settings): FPS limit -> engine -fps.
-  // An explicit -fps in ?args= wins.
+  // FPS limit from the URL (?fps=60) -> engine -fps. An explicit -fps in
+  // ?args= wins.
   if (!args.includes('-fps')) {
-    const fps = parseInt(localStorage.getItem('gx-fps') || '30', 10);
-    if (fps > 0 && fps !== 30) {
+    const fps = gxFpsParam();
+    if (fps !== 30) {
       args.push('-fps', String(fps));
     }
   }
@@ -124,10 +137,8 @@ async function gxStartGame() {
       // 0 = OPFS (WASMFS OPFS backend), 1 = IndexedDB (js-file backend +
       // population from window.gxFiles). Read by WebMain.cpp.
       gxStorageMode: window.gxStorageKind === 'idb' ? 1 : 0,
-      // Loader settings: render FPS limit (see index.html #gx-settings).
-      gxFps: parseInt(localStorage.getItem('gx-fps') || '30', 10),
-      // Selected build name (stored by loader, consumed by WebMain if needed).
-      gxBuildName: localStorage.getItem('gx-build') || 'default_ru',
+      // Render FPS limit from the URL (?fps=60).
+      gxFps: gxFpsParam(),
       print: (t) => console.log('[game]', t),
       printErr: (t) => {
         // Drop known per-frame spam (same filter the iOS port uses in its
@@ -150,8 +161,8 @@ async function gxStartGame() {
     };
 
     const s = document.createElement('script');
-    s.src = 'GeneralsXZH.js?v=' + buildId;
-    s.onerror = () => reject(new Error('Не удалось загрузить GeneralsXZH.js'));
+    s.src = gxEngineName() + '.js?v=' + buildId;
+    s.onerror = () => reject(new Error('Не удалось загрузить ' + gxEngineName() + '.js'));
     document.body.appendChild(s);
   });
 }
@@ -184,9 +195,9 @@ function gxInstallFocusGuard() {
 
 // Called when the engine quits (from C++ before _exit, and via Module.onExit).
 // The wasm runtime is torn down and cannot restart in place, so reload the page:
-// gxBoot shows the start overlay with Play, and since the build is already in
-// OPFS the relaunch only re-fetches the cached engine wasm. Guarded so a double
-// call (C++ hook + onExit) reloads only once.
+// gxBoot relaunches the game automatically (there is no start screen), and
+// since the data is already in OPFS the relaunch only re-fetches the cached
+// engine wasm. Guarded so a double call (C++ hook + onExit) reloads only once.
 let gxExiting = false;
 function gxOnEngineExit() {
   if (gxExiting) return;

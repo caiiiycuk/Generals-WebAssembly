@@ -299,7 +299,7 @@
                 "RTS_CRASHDUMP_ENABLE": "OFF",
                 "RTS_BUILD_OPTION_FFMPEG": "ON",
                 "RTS_BUILD_OPTION_SAGE_PATCH": "OFF",
-                "RTS_BUILD_GENERALS": "OFF",
+                "RTS_BUILD_GENERALS": "ON",
                 "RTS_BUILD_CORE_TOOLS": "OFF",
                 "RTS_BUILD_ZEROHOUR_TOOLS": "OFF",
                 "RTS_BUILD_ZEROHOUR_EXTRAS": "OFF"
@@ -426,15 +426,15 @@
             "name": "emscripten",
             "configurePreset": "emscripten",
             "displayName": "Build Web (Emscripten/WASM) Release",
-            "description": "Build the Zero Hour web port (GeneralsXZH.js/.wasm)",
-            "targets": ["z_generals"]
+            "description": "Build the web port: Zero Hour (GeneralsXZH.js/.wasm) and base Generals (GeneralsX.js/.wasm)",
+            "targets": ["z_generals", "g_generals"]
         },
         {
             "name": "emscripten-debug",
             "configurePreset": "emscripten-debug",
             "displayName": "Build Web (Emscripten/WASM) Debug",
-            "description": "Build the Zero Hour web port with assertions and source maps",
-            "targets": ["z_generals"]
+            "description": "Build the web port (ZH + base Generals) with assertions and source maps",
+            "targets": ["z_generals", "g_generals"]
         }
     ],
     "workflowPresets": [

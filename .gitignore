@@ -99,6 +99,10 @@ ios/GeneralsXZH.xcodeproj/
 # Web port build artifacts (assembled by scripts/web/make-dist.sh)
 web/dist/
 web/gamedata/
+web/staging/
+
+# Local retail game data (source for web/gamedata symlink and native runs)
+gamedata/
 
 # Web shell npm deps (brotli-wasm source; bundled outputs are committed)
 web/shell/node_modules/

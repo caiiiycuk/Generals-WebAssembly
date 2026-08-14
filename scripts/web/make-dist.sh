@@ -58,16 +58,30 @@ fi
 # ── Wasm build ────────────────────────────────────────────────────────────────
 echo "==> Wasm build"
 cp "$WASM_DIR/GeneralsXZH.js" "$WASM_DIR/GeneralsXZH.wasm" "$DIST/"
-BUILD_ID=$(shasum -a 256 "$DIST/GeneralsXZH.wasm" | cut -c1-12)
+# GeneralsX @build caiiiycuk 14/08/2026 Base Generals web build (?game=generals):
+# built as a sibling target (Generals/GeneralsX.*); optional so a ZH-only
+# build tree still produces a working dist.
+BASE_WASM_DIR="$(dirname "$WASM_DIR")/Generals"
+if [ -f "$BASE_WASM_DIR/GeneralsX.wasm" ]; then
+    cp "$BASE_WASM_DIR/GeneralsX.js" "$BASE_WASM_DIR/GeneralsX.wasm" "$DIST/"
+    echo "    + base Generals engine (GeneralsX.js/.wasm)"
+else
+    echo "    (no base Generals wasm at $BASE_WASM_DIR - ?game=generals will not work)"
+fi
+BUILD_ID=$(cat "$DIST/GeneralsXZH.wasm" "$DIST/GeneralsX.wasm" 2>/dev/null | shasum -a 256 | cut -c1-12)
 printf '{"buildId": "%s"}\n' "$BUILD_ID" > "$DIST/build.json"
 echo "    buildId: $BUILD_ID"
 
 if $SKIP_ASSETS; then
+    # GeneralsX @tweak caiiiycuk 14/08/2026 Torrent-deploy model: dist may
+    # legitimately carry no packed assets — create an empty index instead of failing.
     if [ ! -f "$DIST/assets/builds.json" ]; then
-        echo "ERROR: --skip-assets requires existing $DIST/assets/builds.json" >&2
-        exit 1
+        mkdir -p "$DIST/assets"
+        echo '[]' > "$DIST/assets/builds.json"
+        echo "==> Assets: none packed — wrote empty assets/builds.json (--skip-assets)"
+    else
+        echo "==> Assets: keeping existing packed game data (--skip-assets)"
     fi
-    echo "==> Assets: keeping existing packed game data (--skip-assets)"
     echo "==> Done: $DIST"
     exit 0
 fi

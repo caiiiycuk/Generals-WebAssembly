@@ -41,7 +41,11 @@ async function gxDetectStorage() {
       const probe = await root.getFileHandle('.gx-probe', { create: true });
       await root.removeEntry('.gx-probe');
       void probe;
-      return new OpfsStorage(root);
+      // Everything (GameData/, GameDataGenerals/, meta/, userdata/) lives in
+      // the game's own ccgenerals/ subdirectory, not in the shared OPFS root —
+      // the wasm side mounts the same base (GX_OPFS_BASE in WebMain.cpp).
+      const base = await root.getDirectoryHandle('ccgenerals', { create: true });
+      return new OpfsStorage(base);
     } catch (e) {
       console.warn('[storage] OPFS probe failed, falling back to IndexedDB:', e);
     }

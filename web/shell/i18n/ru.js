@@ -35,6 +35,7 @@ window.gxLocales.ru = {
   'error.workerLoad': 'не удалось загрузить unpack-worker.js',
   'error.workerMessage': 'ошибка сериализации сообщения',
   'error.storage': 'Ни OPFS, ни IndexedDB недоступны — хранилище для файлов игры отсутствует.',
+  'error.notInstalled': 'Данные игры не найдены в хранилище браузера. Сначала разверните данные игры (торрент), затем обновите страницу.',
   'error.engineHttp': 'Движок недоступен: HTTP {status}',
   'unit.gb': 'ГБ',
   'unit.mb': 'МБ',

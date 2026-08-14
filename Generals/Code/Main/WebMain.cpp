@@ -1,5 +1,5 @@
 /*
-**	Command & Conquer Generals Zero Hour(tm)
+**	Command & Conquer Generals(tm)
 **	Copyright 2025 Electronic Arts Inc.
 **
 **	This program is free software: you can redistribute it and/or modify
@@ -19,21 +19,19 @@
 /*
 ** WebMain.cpp
 **
-** Entry point for the Emscripten (WebAssembly) build.
+** Entry point for the Emscripten (WebAssembly) build of the base game.
 **
-** GeneralsX @build web-port 05/07/2026 - Web port Phase 0
-** Follows SDL3Main.cpp (the Linux/macOS/iOS entry point) with the platform
-** bootstrap swapped for the browser environment:
+** GeneralsX @build caiiiycuk 14/08/2026 Web entry point for base Generals.
+** Adapted from GeneralsMD/Code/Main/WebMain.cpp (the Zero Hour web entry);
+** the only differences are branding and the asset root: the base game's
+** primary assets live in GX_OPFS_BASE/GameDataGenerals (the same directory
+** ZH loads them from as its secondary asset set), resolved through
+** CNC_GENERALS_PATH instead of CNC_GENERALS_ZH_PATH.
 **  - No Vulkan/DXVK: rendering goes through the statically linked d3d8webgl
 **    library (D3D8 -> WebGL2), created by DX8Wrapper::Init() directly.
 **  - Game data lives in OPFS (Origin Private File System) under the
-**    ccgenerals/ subdirectory (the OPFS root is shared origin-wide, so the
-**    game keeps everything in its own folder). The deployer provisions the
-**    .big set there before the wasm module starts; here we mount the OPFS
-**    root at /opfs via WASMFS and point the engine's asset/user-data
-**    resolution at /opfs/ccgenerals/* with two environment variables
-**    (StdBIGFileSystem reads CNC_GENERALS_ZH_PATH, GlobalData reads
-**    XDG_DATA_HOME) - no file-system code changes needed.
+**    ccgenerals/ subdirectory; the deployer provisions it before the wasm
+**    module starts. The OPFS root is mounted at /opfs via WASMFS.
 **  - main() runs on a dedicated pthread (-sPROXY_TO_PTHREAD), so the engine's
 **    blocking GameEngine::execute() loop and synchronous fread() over OPFS
 **    access handles are both legal here.
@@ -120,14 +118,23 @@ GameEngine *CreateGameEngine(void)
 // The torrent deployer and the JS shell (storage.js) use the same base.
 #define GX_OPFS_BASE "/opfs/ccgenerals"
 
+// Base-game asset root inside the shared ccgenerals/ layout. ZH owns
+// GameData/; the base game's .big set lives in the sibling GameDataGenerals/
+// (the same directory ZH consumes as its secondary asset source).
+#define GX_ASSET_DIR GX_OPFS_BASE "/GameDataGenerals"
+
 /**
  * PopulateFromIdb
  *
  * IndexedDB fallback (no OPFS in this browser/context): the JS loader has
  * materialized every asset as an ArrayBuffer on window.gxFiles (main thread).
  * Copy them, chunk by chunk through a small wasm-heap buffer, into the
- * js-file-backend mount at /opfs/ccgenerals/GameData. File payloads then live in JS
- * memory (NOT the wasm heap), so a 1.5+ GB asset set does not eat the heap.
+ * js-file-backend mount. File payloads then live in JS memory (NOT the wasm
+ * heap), so a large asset set does not eat the heap.
+ *
+ * The JS storage layer keys base-game assets with the GameDataGenerals/
+ * prefix and ZH assets without one (see gxStoragePath() in storage.js); the
+ * unprefixed ZH files land in GameData/ and are simply unused by this build.
  *
  * MAIN_THREAD_EM_ASM blocks this pthread while the JS runs on the main
  * thread; the copies via HEAPU8 are plain SharedArrayBuffer writes.
@@ -141,7 +148,7 @@ static bool PopulateFromIdb()
 		fprintf(stderr, "FATAL: IndexedDB mode but window.gxFiles is empty - loader did not materialize assets\n");
 		return false;
 	}
-	fprintf(stderr, "INFO: populating " GX_OPFS_BASE "/GameData from IndexedDB (%d files)...\n", fileCount);
+	fprintf(stderr, "INFO: populating " GX_OPFS_BASE " from IndexedDB (%d files)...\n", fileCount);
 
 	const size_t kChunk = 8u * 1024u * 1024u;
 	char *chunk = (char *)malloc(kChunk);
@@ -157,11 +164,9 @@ static bool PopulateFromIdb()
 		}, i);
 		const size_t size = (size_t)sizeD;
 
-		// Create intermediate directories under GX_OPFS_BASE/GameData. Paths
-		// prefixed with GameDataGenerals/ (the optional base-game install) or
-		// userdata/ (write-back saves restored from IndexedDB) live as
-		// GX_OPFS_BASE siblings of GameData/ instead - see
-		// gxStoragePath()/gxIdbPutUserFile in the JS shell.
+		// Same path mapping as the ZH build: GameDataGenerals/ and userdata/
+		// prefixed paths are GX_OPFS_BASE siblings of GameData/, everything
+		// else belongs to the ZH install under GameData/.
 		std::string full = (strncmp(pathBuf, "GameDataGenerals/", 17) == 0 ||
 		                    strncmp(pathBuf, "userdata/", 9) == 0)
 			? std::string(GX_OPFS_BASE "/") + pathBuf
@@ -270,17 +275,18 @@ extern "C" void gxWebPeriodic(void)
  *
  * Mounts persistent storage at /opfs and points the engine's path
  * resolution at the game's own subdirectory (GX_OPFS_BASE = /opfs/ccgenerals):
- *   GX_OPFS_BASE/GameData  - read-only game assets (.big set, Data/, Maps/, fonts/)
+ *   GX_ASSET_DIR (= GX_OPFS_BASE/GameDataGenerals)
+ *                          - read-only base-game assets (.big set, Data/,
+ *                            Maps/, fonts/)
  *   GX_OPFS_BASE/userdata  - saves, Options.ini, replays (XDG_DATA_HOME branch
  *                            of GlobalData::BuildUserDataPathFromRegistry()).
  *
- * Preferred backend is OPFS (Module.gxStorageMode == 0): the JS loader wrote
+ * Preferred backend is OPFS (Module.gxStorageMode == 0): the deployer wrote
  * the files into OPFS before main() started; synchronous access handles work
  * here because -sPROXY_TO_PTHREAD runs main() on a pthread.
  *
  * Fallback (gxStorageMode == 1) is the IndexedDB path: a js-file backend is
  * mounted instead and populated from window.gxFiles (see PopulateFromIdb).
- * Saves are session-local in this mode until Phase 3 adds write-back.
  */
 static bool MountGameStorage()
 {
@@ -312,33 +318,28 @@ static bool MountGameStorage()
 	s_gxIdbMode = (mode != 0);
 	mkdir(GX_OPFS_BASE, 0777); // harmless if the deployer already made it
 	if (mode != 0) {
-		mkdir(GX_OPFS_BASE "/GameData", 0777);
+		mkdir(GX_ASSET_DIR, 0777);
 		if (!PopulateFromIdb()) {
 			return false;
 		}
 	}
 
 	// Asset root: StdBIGFileSystem::resolvePrimaryAssetDirectory() checks this
-	// env var first; everything else (Data/, Maps/) resolves from the CWD.
-	setenv("CNC_GENERALS_ZH_PATH", GX_OPFS_BASE "/GameData", 1);
-
-	// Base-game assets: ZH only ships the addon's .big set; ground terrain
-	// tiles, roads and many W3D models live in the first game's Terrain.big/
-	// W3D.big/Textures.big. loadBaseGeneralsAssetsForZH() tries this env var
-	// first and silently moves on if the directory has no .big files.
-	setenv("CNC_GENERALS_PATH", GX_OPFS_BASE "/GameDataGenerals", 1);
+	// env var first (the RTS_GENERALS build reads CNC_GENERALS_PATH);
+	// everything else (Data/, Maps/) resolves from the CWD.
+	setenv("CNC_GENERALS_PATH", GX_ASSET_DIR, 1);
 
 	// User data: GlobalData::BuildUserDataPathFromRegistry() Linux/XDG branch
-	// yields $XDG_DATA_HOME/GeneralsX/GeneralsZH/.
+	// yields $XDG_DATA_HOME/GeneralsX/Generals/.
 	setenv("XDG_DATA_HOME", GX_OPFS_BASE "/userdata", 1);
-	mkdir(GX_OPFS_BASE "/userdata", 0777); // harmless if the JS loader already made it
+	mkdir(GX_OPFS_BASE "/userdata", 0777); // harmless if the deployer already made it
 
-	if (chdir(GX_OPFS_BASE "/GameData") != 0) {
-		fprintf(stderr, "WARNING: chdir(" GX_OPFS_BASE "/GameData) failed - assets not deployed yet?\n");
+	if (chdir(GX_ASSET_DIR) != 0) {
+		fprintf(stderr, "WARNING: chdir(" GX_ASSET_DIR ") failed - assets not deployed yet?\n");
 		return false;
 	}
 
-	fprintf(stderr, "INFO: game storage mounted at /opfs (%s; assets: " GX_OPFS_BASE "/GameData, userdata: " GX_OPFS_BASE "/userdata)\n",
+	fprintf(stderr, "INFO: game storage mounted at /opfs (%s; assets: " GX_ASSET_DIR ", userdata: " GX_OPFS_BASE "/userdata)\n",
 	        mode == 0 ? "OPFS" : "IndexedDB via js-file backend");
 	return true;
 }
@@ -356,7 +357,7 @@ int main(int argc, char* argv[])
 	__argv = argv;
 
 	fprintf(stderr, "=================================================\n");
-	fprintf(stderr, " Command & Conquer Generals: Zero Hour (Web)\n");
+	fprintf(stderr, " Command & Conquer Generals (Web)\n");
 	fprintf(stderr, " Emscripten + SDL3 + d3d8webgl Build\n");
 	fprintf(stderr, "=================================================\n\n");
 
@@ -400,7 +401,7 @@ int main(int argc, char* argv[])
 			// only delivers input and window events.
 			fprintf(stderr, "INFO: Creating SDL3 window (canvas)...\n");
 			TheSDL3Window = SDL_CreateWindow(
-				"Command & Conquer Generals: Zero Hour",
+				"Command & Conquer Generals",
 				1024, 768,
 				SDL_WINDOW_RESIZABLE
 			);
@@ -414,7 +415,6 @@ int main(int argc, char* argv[])
 			ApplicationHWnd = (HWND)TheSDL3Window;
 			fprintf(stderr, "INFO: SDL3 window created successfully\n");
 
-#ifdef __EMSCRIPTEN__
 			// On Emscripten the canvas must be sized to the actual viewport
 			// before any SDL size query or resolution injection - otherwise
 			// the canvas defaults to 1024x768 (the SDL_CreateWindow size)
@@ -424,7 +424,6 @@ int main(int argc, char* argv[])
 			int vpH = MAIN_THREAD_EM_ASM_INT({ return window.innerHeight; });
 			SDL_SetWindowSize(TheSDL3Window, vpW, vpH);
 			// d3d8webgl_set_native_mode is called from the resolution block below.
-#endif
 
 			// Match the engine's internal resolution to the SDL window/canvas
 			// (same pattern as the iOS port): injected as -xres/-yres argv so
@@ -472,8 +471,6 @@ int main(int argc, char* argv[])
 		// swscale contexts before FFmpegFile::open() runs, so set it here.
 		av_log_set_level(16);
 
-
-
 		// Loader FPS setting (Module.gxFps): enforced each frame in
 		// gxWebPeriodic() through FramePacer's render/logic decoupling.
 		s_gxFpsSetting = MAIN_THREAD_EM_ASM_INT({
@@ -486,7 +483,6 @@ int main(int argc, char* argv[])
 		// Call cross-platform game entry point
 		exitcode = GameMain();
 
-		// GeneralsX @build web-port 05/07/2026 - Web port Phase 2
 		// GameMain() returned with the rAF main loop registered and the
 		// engine still alive (see GameEngine::execute web branch). Keep the
 		// wasm runtime (and this pthread) alive; NONE of the teardown below

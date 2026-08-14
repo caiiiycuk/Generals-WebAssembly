@@ -82,8 +82,10 @@ target_include_directories(g_generals PRIVATE
 target_sources(g_generals PRIVATE
     $<$<BOOL:${WIN32}>:WinMain.cpp>
     $<$<BOOL:${WIN32}>:WinMain.h>
+    # Web (Emscripten) entry point (GeneralsX @build caiiiycuk 14/08/2026)
+    $<$<BOOL:${EMSCRIPTEN}>:WebMain.cpp>
     # Linux SDL3 entry point
-    $<$<NOT:$<BOOL:${WIN32}>>:SDL3Main.cpp>
+    $<$<AND:$<NOT:$<BOOL:${WIN32}>>,$<NOT:$<BOOL:${EMSCRIPTEN}>>>:SDL3Main.cpp>
     # Linux stubs
     $<$<NOT:$<BOOL:${WIN32}>>:LinuxStubs.cpp>
 )

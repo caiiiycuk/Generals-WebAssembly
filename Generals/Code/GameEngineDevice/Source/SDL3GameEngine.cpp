@@ -41,6 +41,10 @@
 #include "GameClient/GameWindowManager.h"
 #include "GameClient/Gadget.h"
 #include "W3DDevice/GameLogic/W3DGameLogic.h"
+#ifdef __EMSCRIPTEN__
+// d3d8webgl canvas resize helper, declared for the resize handler body.
+extern "C" void d3d8webgl_resize(int, int);
+#endif
 #include "W3DDevice/GameClient/W3DGameClient.h"
 #include "W3DDevice/Common/W3DModuleFactory.h"
 #include "W3DDevice/Common/W3DThingFactory.h"
@@ -289,6 +293,22 @@ void SDL3GameEngine::pollSDL3Events(void)
 
 			case SDL_EVENT_KEY_DOWN:
 			case SDL_EVENT_KEY_UP:
+#ifdef __EMSCRIPTEN__
+				// GeneralsX @bugfix web-port 09/07/2026 Self-healing focus: after
+				// repeated tab minimize/restore cycles the browser can deliver a
+				// blur without a matching focus, leaving m_IsActive=false and the
+				// mouse capture blocked forever ("controls stopped working" while
+				// the game itself kept running). Real input arriving IS proof of
+				// focus - recover on the spot instead of waiting for an event
+				// that may never come.
+				if (!m_IsActive && event.type == SDL_EVENT_KEY_DOWN) {
+					m_IsActive = true;
+					if (TheMouse) {
+						TheMouse->regainFocus();
+						TheMouse->refreshCursorCapture();
+					}
+				}
+#endif
 				// Fighter19 pattern: direct addSDLEvent() call
 				// GeneralsX @refactor felipebraz 16/02/2026 Simplified event routing
 				if (TheKeyboard) {
@@ -297,6 +317,27 @@ void SDL3GameEngine::pollSDL3Events(void)
 						keyboard->addSDLEvent(&event);
 					}
 				}
+#ifdef __EMSCRIPTEN__
+				// GeneralsX @build web-port 08/07/2026 Browsers never deliver
+				// Enter/Return through the text-input (SDL_EVENT_TEXT_INPUT) path
+				// - it is a key event only. GadgetTextEntry finishes an edit (send
+				// chat, confirm name) on GWM_IME_CHAR == VK_RETURN, which native
+				// platforms get from the OS IME. Synthesize that here from the
+				// Return key-down so chat/name entry fields submit.
+				if (event.type == SDL_EVENT_KEY_DOWN && !event.key.repeat &&
+				    (event.key.scancode == SDL_SCANCODE_RETURN ||
+				     event.key.scancode == SDL_SCANCODE_KP_ENTER)) {
+					GameWindow* entry = m_TextInputFocusWindow;
+					if (entry && TheWindowManager &&
+					    BitIsSet(entry->winGetStyle(), GWS_ENTRY_FIELD)) {
+						// VK_RETURN (0x0D): GadgetTextEntry's GWM_IME_CHAR handler
+						// sends GEM_EDIT_DONE on this exact value.
+						const WindowMsgData GX_VK_RETURN = 0x0D;
+						TheWindowManager->winSendInputMsg(entry, GWM_IME_CHAR,
+							GX_VK_RETURN, 0);
+					}
+				}
+#endif
 				break;
 
 			case SDL_EVENT_TEXT_INPUT:
@@ -307,6 +348,18 @@ void SDL3GameEngine::pollSDL3Events(void)
 			case SDL_EVENT_MOUSE_BUTTON_DOWN:
 			case SDL_EVENT_MOUSE_BUTTON_UP:
 			case SDL_EVENT_MOUSE_WHEEL:
+#ifdef __EMSCRIPTEN__
+				// Self-healing focus (see the key-event twin above): a real click
+				// proves the tab is focused even if the browser's focus event got
+				// lost across minimize/restore churn.
+				if (!m_IsActive && event.type == SDL_EVENT_MOUSE_BUTTON_DOWN) {
+					m_IsActive = true;
+					if (TheMouse) {
+						TheMouse->regainFocus();
+						TheMouse->refreshCursorCapture();
+					}
+				}
+#endif
 				// Fighter19 pattern: direct addSDLEvent() call with raw SDL_Event
 				// GeneralsX @refactor felipebraz 16/02/2026 Simplified event routing
 				if (TheMouse) {
@@ -461,8 +514,16 @@ void SDL3GameEngine::handleMouseWheelEvent(const SDL_MouseWheelEvent& event)
  */
 void SDL3GameEngine::handleWindowEvent(const SDL_WindowEvent& event)
 {
-	// TODO: Phase 2 - Handle window resize, notify graphics subsystem
-	// fprintf(stderr, "DEBUG: Window event (type=%d)\n", event.type);
+#ifdef __EMSCRIPTEN__
+	// Forward the resize to the d3d8webgl render pipeline so its
+	// backbuffer and viewport match the canvas (the user's browser
+	// window changed size).
+	if (event.type == SDL_EVENT_WINDOW_RESIZED && m_SDLWindow) {
+		int w = 0, h = 0;
+		SDL_GetWindowSizeInPixels(m_SDLWindow, &w, &h);
+		d3d8webgl_resize(w & ~1, h & ~1);
+	}
+#endif
 }
 
 /**

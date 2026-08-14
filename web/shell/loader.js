@@ -169,6 +169,32 @@ async function gxCheckEnvironment() {
   if (typeof WebAssembly === 'undefined') throw new Error(gxText('error.webAssembly'));
 }
 
+// Torrent-deploy model: game data is provisioned into OPFS by an external
+// step BEFORE the game is launched (see README.dz.md). Instead of trusting an
+// "installed" marker, detect a real installation: at least one *.big in the
+// selected game's asset directory (storage.root is already anchored at
+// ccgenerals/) — GameData/ for Zero Hour, GameDataGenerals/ for the base game
+// (?game=generals). For the IndexedDB fallback, look among the stored paths.
+async function gxCheckInstalled(storage) {
+  const isBaseGame = new URLSearchParams(location.search).get('game') === 'generals';
+  if (storage.kind === 'opfs') {
+    try {
+      const dir = await storage.root.getDirectoryHandle(isBaseGame ? 'GameDataGenerals' : 'GameData');
+      for await (const [name, handle] of dir.entries()) {
+        if (handle.kind === 'file' && name.toLowerCase().endsWith('.big')) return true;
+      }
+    } catch {}
+    return false;
+  }
+  try {
+    const paths = await storage.listPaths();
+    return paths.some(p => typeof p === 'string' && p.toLowerCase().endsWith('.big') &&
+      p.startsWith('GameDataGenerals/') === isBaseGame);
+  } catch {
+    return false;
+  }
+}
+
 // IndexedDB mode: load every stored file into window.gxFiles for the engine
 // (OPFS mode reads the mounted filesystem directly, so this is a no-op there).
 async function gxMaterializeIdb(storage) {
@@ -281,120 +307,28 @@ async function gxBoot() {
     document.getElementById('gx-storage-kind').textContent =
       storage.kind === 'opfs' ? 'OPFS' : 'IndexedDB (fallback)';
 
-    // Show settings + play immediately
-    document.getElementById('gx-progress-wrap').style.display = 'none';
-    gxUI.status('loader.ready');
+    // No start screen: the game boots straight into loading. Game data must
+    // already be deployed into storage (torrent -> OPFS) before launch;
+    // without it boot stops here with an error.
+    const installed = await gxCheckInstalled(storage);
+    if (!installed) {
+      document.getElementById('gx-progress-wrap').style.display = 'none';
+      gxUI.error(gxText('error.notInstalled'));
+      return;
+    }
 
-    const btn = document.getElementById('gx-play');
-    btn.style.display = 'inline-block';
-
-    const settingsBtn = document.getElementById('gx-settings-btn');
-    const settingsBox = document.getElementById('gx-settings');
-    const fpsSel = document.getElementById('gx-fps');
-    fpsSel.value = localStorage.getItem('gx-fps') || '30';
-    if (![...fpsSel.options].some(o => o.value === fpsSel.value)) fpsSel.value = '30';
-    fpsSel.addEventListener('change', () => localStorage.setItem('gx-fps', fpsSel.value));
-
-    const buildSel = document.getElementById('gx-build');
-    buildSel.value = localStorage.getItem('gx-build') || 'default_ru';
-    if (![...buildSel.options].some(o => o.value === buildSel.value)) buildSel.value = 'default_ru';
-    buildSel.addEventListener('change', () => localStorage.setItem('gx-build', buildSel.value));
-
-    settingsBtn.style.display = 'inline-block';
-    settingsBtn.addEventListener('click', () => { settingsBox.hidden = !settingsBox.hidden; });
-
-    // Wipe-everything button: OPFS, IndexedDB, Cache Storage, local/session
-    // storage, and the COI service worker. Two clicks to confirm.
-    const wipeBtn = document.getElementById('gx-wipe');
-    let wipeArmed = false;
-    let wipeTextKey = 'shell.wipe';
-    const renderWipeText = () => { wipeBtn.textContent = gxText(wipeTextKey); };
-    window.addEventListener('gxlanguagechange', renderWipeText);
-    wipeBtn.addEventListener('click', async () => {
-      if (!wipeArmed) {
-        wipeArmed = true;
-        wipeTextKey = 'loader.wipeConfirm';
-        renderWipeText();
-        setTimeout(() => {
-          wipeArmed = false;
-          wipeTextKey = 'shell.wipe';
-          renderWipeText();
-        }, 4000);
-        return;
-      }
-      wipeBtn.disabled = true;
-      wipeTextKey = 'loader.wiping';
-      renderWipeText();
-      try {
-        await gxWipeAllStorage();
-        wipeTextKey = 'loader.wipeDone';
-        renderWipeText();
-        setTimeout(() => location.reload(), 600);
-      } catch (e) {
-        console.error('[loader] wipe failed:', e);
-        wipeBtn.disabled = false;
-        wipeTextKey = 'loader.wipeError';
-        renderWipeText();
-        wipeArmed = false;
-      }
-    });
-
-    await new Promise((resolve) => btn.addEventListener('click', resolve, { once: true }));
-    btn.style.display = 'none';
-    settingsBtn.style.display = 'none';
-    settingsBox.hidden = true;
-
-    const build = localStorage.getItem('gx-build') || 'default_ru';
-    const markerKey = 'installed-' + build;
-
-    // Stage 1: download the engine (wasm) into memory, with progress. Always
-    // needed — done before resources so a fresh install and a cached reload both
-    // fetch the engine here, and the engine never fetches its own wasm later.
-    document.getElementById('gx-progress-wrap').style.display = 'block';
+    // Download the engine (wasm) into memory, with progress. Always needed —
+    // the engine never fetches its own wasm later.
     gxUI.download(0, 0);
     gxUI.unpack(0, 0);
     gxUI.status('loader.engine');
     await gxPreloadEngine((received, total) => gxUI.download(received, total));
-
-    // Already installed? Skip the resource download/unpack and go straight to play.
-    const marker = await storage.readMeta(markerKey);
-    if (marker && marker.complete) {
-      console.log('[loader] сборка ' + build + ' уже установлена (' + marker.files + ' файлов) — пропускаю загрузку');
-      if (storage.kind === 'idb') {
-        gxUI.status('loader.files');
-        await gxMaterializeIdb(storage);
-      }
-      gxUI.status('loader.starting');
-      document.getElementById('gx-progress-wrap').style.display = 'none';
-      await gxStartGame();
-      gxUI.overlay.style.display = 'none';
-      return;
-    }
-
-    // Stage 2: download + unpack game resources.
-    gxUI.download(0, 0);
-    gxUI.unpack(0, 0);
-
-    // The dispatcher worker fetches, slices segments, decompresses them on a
-    // parallel pool, and writes files — download and unpack run concurrently.
-    // NOTE: a STABLE url (no cache-buster) so Range resume across page reloads
-    // targets the same resource; freshness is validated by the server ETag in
-    // the resume journal.
-    const url = 'assets/' + encodeURIComponent(build) + '/build.data';
-    const journalKey = 'unpack-journal-' + build;
-    gxUI.status('loader.assets');
-    const result = await gxStreamExtract(url, storage, journalKey);
-    console.log('[loader] распаковано ' + result.files + ' файлов');
 
     // IndexedDB mode: materialize files into window.gxFiles for the engine.
     if (storage.kind === 'idb') {
       gxUI.status('loader.files');
       await gxMaterializeIdb(storage);
     }
-
-    // Mark installed; drop the resume journal (it's for interrupted installs).
-    await storage.writeMeta(markerKey, { complete: true, files: result.files, ts: Date.now() });
-    if (storage.kind === 'opfs') await storage.writeMeta(journalKey, {}).catch(() => {});
 
     gxUI.status('loader.starting');
     document.getElementById('gx-progress-wrap').style.display = 'none';
@@ -404,5 +338,11 @@ async function gxBoot() {
     gxUI.error(e && e.message ? e.message : String(e));
   }
 }
+
+// The boot flow no longer downloads game data (torrent-deploy model) and has
+// no start-screen UI, but the GAXD->OPFS unpack pipeline and the full-wipe
+// helper stay exported for the external deployer page / devtools console.
+window.gxStreamExtract = gxStreamExtract;
+window.gxWipeAllStorage = gxWipeAllStorage;
 
 window.addEventListener('DOMContentLoaded', gxBoot);

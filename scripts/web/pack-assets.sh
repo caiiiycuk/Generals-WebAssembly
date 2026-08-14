@@ -30,10 +30,14 @@ mkdir -p "$OUTDIR"
 mkdir -p "$WORK/files"
 
 # Copy ZH data
+# GeneralsX @tweak caiiiycuk 14/08/2026 Skip OS junk, redundant Backup Scripts and empty dirs (-m).
 ZH="$DATADIR/GeneralsZH"
 if [ -d "$ZH" ]; then
     echo "==> Zero Hour: $ZH"
-    rsync -a \
+    rsync -am \
+        --exclude='.DS_Store' \
+        --exclude='Thumbs.db' \
+        --exclude='Data/Backup Scripts/' \
         --include='*/' \
         --include='*.big' \
         --include='Data/**' \
@@ -46,7 +50,10 @@ fi
 BASE="$DATADIR/Generals"
 if [ -d "$BASE" ]; then
     echo "==> Base Generals: $BASE"
-    rsync -a \
+    rsync -am \
+        --exclude='.DS_Store' \
+        --exclude='Thumbs.db' \
+        --exclude='Data/Backup Scripts/' \
         --include='*/' \
         --include='*.big' \
         --include='Data/**' \

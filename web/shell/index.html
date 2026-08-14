@@ -58,37 +58,6 @@
   #gx-pct { margin-top: 10px; font-size: 15px; }
   #gx-detail { margin-top: 6px; font-size: 12px; opacity: .65; min-height: 16px; }
   #gx-storage-kind { font-size: 11px; opacity: .4; margin-top: 18px; }
-  #gx-play {
-    display: none; margin-top: 28px; padding: 14px 58px;
-    font-size: 20px; letter-spacing: 3px; cursor: pointer;
-    color: #0b0e11; background: linear-gradient(180deg, #e8b64c, #b9821f);
-    border: none; border-radius: 6px; text-transform: uppercase; font-weight: 700;
-  }
-  #gx-play:hover { filter: brightness(1.1); }
-  #gx-settings-btn {
-    display: none; margin-top: 12px; padding: 8px 22px;
-    font-size: 13px; letter-spacing: 1px; cursor: pointer;
-    color: #d8dee6; background: #1d2733; border: 1px solid #2c3a4a;
-    border-radius: 6px;
-  }
-  #gx-settings-btn:hover { background: #253242; }
-  #gx-settings {
-    margin-top: 14px; padding: 14px 20px; font-size: 14px;
-    background: #131b24; border: 1px solid #2c3a4a; border-radius: 6px;
-    text-align: left;
-  }
-  #gx-settings select {
-    margin-left: 8px; padding: 4px 8px; font-size: 14px;
-    color: #d8dee6; background: #1d2733; border: 1px solid #2c3a4a; border-radius: 4px;
-  }
-  #gx-settings-note { margin-top: 8px; font-size: 11px; opacity: .5; }
-  #gx-wipe {
-    display: block; width: 100%; margin-top: 12px; padding: 8px;
-    font-size: 12px; cursor: pointer; border-radius: 5px;
-    color: #f0b0b0; background: #2a1616; border: 1px solid #7c3a3a;
-  }
-  #gx-wipe:hover { background: #3a1d1d; }
-  #gx-wipe-note { margin-top: 6px; font-size: 10px; opacity: .45; line-height: 1.4; }
   #gx-error {
     display: none; margin-top: 24px; max-width: min(640px, 85vw);
     padding: 14px 18px; border: 1px solid #7c3a3a; border-radius: 6px;
@@ -191,27 +160,6 @@
     </div>
   </div>
   <div id="gx-detail" data-i18n="shell.initializing">Инициализация…</div>
-  <button id="gx-play" data-i18n="shell.play">Играть</button>
-  <button id="gx-settings-btn" type="button" data-i18n="shell.settings">Настройки</button>
-  <div id="gx-settings" hidden>
-    <label><span data-i18n="shell.fpsLimit">Лимит FPS:</span>
-      <select id="gx-fps">
-        <option value="30" data-i18n="shell.original">30 (оригинал)</option>
-        <option value="60">60</option>
-        <option value="90">90</option>
-        <option value="120">120</option>
-        <option value="144">144</option>
-      </select>
-    </label>
-    <label><span data-i18n="shell.build">Сборка:</span>
-      <select id="gx-build">
-        <option value="default_ru">default_ru (Generals ZH)</option>
-      </select>
-    </label>
-    <div id="gx-settings-note" data-i18n="shell.settingsNote">Сохраняется в браузере; применяется при запуске игры.</div>
-    <button id="gx-wipe" type="button" data-i18n="shell.wipe">Очистить все данные</button>
-    <div id="gx-wipe-note" data-i18n="shell.wipeNote">Удаляет скачанные ресурсы, сейвы и настройки (OPFS, IndexedDB, кэши). Понадобится полная перезагрузка ресурсов.</div>
-  </div>
   <div id="gx-error"></div>
   <div id="gx-storage-kind"></div>
   <span class="footer-credit">

@@ -35,6 +35,7 @@ window.gxLocales.en = {
   'error.workerLoad': 'failed to load unpack-worker.js',
   'error.workerMessage': 'message serialization failed',
   'error.storage': 'Neither OPFS nor IndexedDB is available — game file storage is unavailable.',
+  'error.notInstalled': 'Game data not found in browser storage. Deploy the game data (torrent) first, then reload this page.',
   'error.engineHttp': 'The engine is unavailable: HTTP {status}',
   'unit.gb': 'GB',
   'unit.mb': 'MB',

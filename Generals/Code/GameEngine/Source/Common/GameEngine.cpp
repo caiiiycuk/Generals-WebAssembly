@@ -838,6 +838,82 @@ void GameEngine::update()
 extern bool DX8Wrapper_IsWindowed;
 extern HWND ApplicationHWnd;
 
+#ifdef __EMSCRIPTEN__
+#include <emscripten.h>
+extern "C" void gxWebPeriodic(void); // WebMain.cpp: IDB userdata write-back
+/** -----------------------------------------------------------------------------------------------
+ * Web main loop. OffscreenCanvas frames only reach the screen when this
+ * pthread yields to its event loop, so a blocking while() would render a
+ * frozen canvas forever. Instead one loop iteration runs per browser
+ * requestAnimationFrame via emscripten_set_main_loop_arg and execute()
+ * returns immediately; GameMain()/WebMain skip their teardown (the engine
+ * must outlive this call) and quit terminates from inside the tick.
+ * GeneralsX @build caiiiycuk 14/08/2026 Ported from the ZH web entry (Phase 2).
+ */
+void GameEngine::execute()
+{
+	auto tick = [](void *arg)
+	{
+		GameEngine *self = static_cast<GameEngine *>(arg);
+		if (self->m_quitting)
+		{
+			fprintf(stderr, "INFO: GameEngine quitting - stopping web main loop\n");
+			emscripten_cancel_main_loop();
+			// Quit tears down the wasm runtime (_exit) — it cannot restart in
+			// place. Reload the page so the shell relaunches the game; assets
+			// are already in OPFS, so the relaunch is quick. Done on the main
+			// thread directly (Module.onExit is unreliable under
+			// PROXY_TO_PTHREAD + _exit).
+			MAIN_THREAD_EM_ASM({
+				if (typeof gxOnEngineExit === 'function') gxOnEngineExit();
+				else location.reload();
+			});
+			_exit(0);
+		}
+
+		try
+		{
+			self->update();
+		}
+		catch (INIException e)
+		{
+			if (e.mFailureMessage)
+				RELEASE_CRASH((e.mFailureMessage));
+			else
+				RELEASE_CRASH(("Uncaught Exception in GameEngine::update"));
+		}
+		catch (...)
+		{
+			try
+			{
+				if (TheRecorder && TheRecorder->getMode() == RECORDERMODETYPE_RECORD && TheRecorder->isMultiplayer())
+					TheRecorder->cleanUpReplayFile();
+			}
+			catch (...)
+			{
+			}
+			RELEASE_CRASH(("Uncaught Exception in GameEngine::update"));
+		}
+
+		// Native pacing preserved: FramePacer sleeps inside the tick (futex
+		// wait on this pthread), rAF presents whenever the tick returns.
+		TheFramePacer->update();
+
+		// Base-game display step/draw per frame (same as the native loop below).
+		if (TheDisplay != nullptr)
+		{
+			TheDisplay->step();
+			TheDisplay->draw();
+		}
+
+		// Web housekeeping (IndexedDB userdata write-back; see WebMain.cpp).
+		gxWebPeriodic();
+	};
+	// fps=0 -> requestAnimationFrame; no infinite-loop simulation (the
+	// "unwind" trick would be swallowed by the catch(...) in WebMain).
+	emscripten_set_main_loop_arg(tick, this, 0, 0);
+}
+#else
 /** -----------------------------------------------------------------------------------------------
  * The "main loop" of the game engine. It will not return until the game exits.
  */
@@ -933,6 +1009,7 @@ void GameEngine::execute()
 
 	}
 }
+#endif // __EMSCRIPTEN__
 
 /** -----------------------------------------------------------------------------------------------
 	* Factory for the message stream
