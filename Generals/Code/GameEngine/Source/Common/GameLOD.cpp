@@ -508,7 +508,19 @@ StaticGameLODLevel GameLODManager::getRecommendedStaticLODLevel()
 		//get system configuration - only need vide chip type, got rest in ::init().
 		testMinimumRequirements(&m_videoChipType,nullptr,nullptr,nullptr,nullptr,nullptr,nullptr);
 		if (m_videoChipType == DC_UNKNOWN)
+		{
+#ifdef __EMSCRIPTEN__
+			// GeneralsX @tweak caiiiycuk 14/08/2026 d3d8webgl deliberately reports
+			// a generic adapter (VendorId=0), which lands here and used to presume
+			// TNT2 - locking the recommended detail level to LOW forever (all
+			// MEDIUM/HIGH presets require GF3/GF4). Any WebGL2-capable browser
+			// vastly outclasses a GeForce4, so presume GF4. Only the LOD
+			// recommendation is affected; shader paths still see DC_UNKNOWN.
+			m_videoChipType = DC_GEFORCE4;
+#else
 			m_videoChipType = DC_TNT2;	//presume it's at least TNT2 level
+#endif
+		}
 
 		Int numMBRam=m_numRAM/(1024*1024);
 

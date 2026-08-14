@@ -39,8 +39,18 @@
 #include "GameClient/Gadget.h"
 #include "W3DDevice/GameLogic/W3DGameLogic.h"
 #ifdef __EMSCRIPTEN__
-// d3d8webgl canvas resize helper, declared for the resize handler body.
+// d3d8webgl canvas resize helper (immediate visual sync) and native mode
+// publisher (used when adopting a new resolution).
 extern "C" void d3d8webgl_resize(int, int);
+extern "C" void d3d8webgl_set_native_mode(int, int);
+#include <emscripten/em_asm.h> // MAIN_THREAD_EM_ASM_DOUBLE (HiDPI resize)
+// Debounced display-mode adoption on browser resize (see handleWindowEvent).
+#include "GameClient/Display.h"
+#include "GameClient/Shell.h"
+#include "GameClient/InGameUI.h"
+#include "GameClient/View.h"
+#include "GameClient/HeaderTemplate.h"
+#include "GameLogic/GameLogic.h"
 #endif
 #include "W3DDevice/GameClient/W3DGameClient.h"
 #include "W3DDevice/Common/W3DModuleFactory.h"
@@ -524,12 +534,85 @@ void SDL3GameEngine::reset(void)
 	GameEngine::reset();
 }
 
+#ifdef __EMSCRIPTEN__
+// GeneralsX @feature caiiiycuk 14/08/2026 Adopt the browser viewport as the
+// game resolution after a resize. Presentation adapts instantly through
+// DX8Wrapper::Pillarbox_Process_Resize() (the canvas backbuffer follows the
+// window each frame, letterboxing the current internal resolution), but that
+// keeps the OLD aspect ratio. Once the size settles (debounce - drag-resize
+// delivers a burst of events) the engine switches to an internal resolution
+// matching the new viewport, using the same sequence the options menu runs
+// for a resolution change.
+static int s_gxPendingResW = 0;
+static int s_gxPendingResH = 0;
+static Uint64 s_gxPendingResTick = 0;
+
+static void gxWebMaybeApplyPendingResolution(void)
+{
+	if (s_gxPendingResW <= 0 || s_gxPendingResH <= 0)
+		return;
+	if (SDL_GetTicks() - s_gxPendingResTick < 350)
+		return;
+	if (!TheDisplay || !TheShell || !TheInGameUI || !TheTacticalView || !TheMouse ||
+			!TheHeaderTemplateManager || !TheWritableGlobalData || !TheGameLogic)
+		return;
+	// Resolution changes are not allowed while a match runs (the options menu
+	// disables its resolution combo box in game too): keep the request pending
+	// and apply it once back in the shell; until then the pillarbox presents
+	// the current resolution aspect-correct.
+	if (TheGameLogic->isInGame() && TheGameLogic->getGameMode() != GAME_SHELL)
+		return;
+
+	int w = s_gxPendingResW;
+	int h = s_gxPendingResH;
+	s_gxPendingResW = 0;
+	s_gxPendingResH = 0;
+
+	// Clamp to the aspect range the game UI supports (4:3 .. 16:9, same rule
+	// as the options resolution list) and to the 800x600 GUI minimum; any
+	// remaining mismatch with the canvas is covered by the pillarbox.
+	if (w * 3 < h * 4)
+		h = w * 3 / 4;        // narrower than 4:3 (portrait): fit by width
+	else if (w * 9 > h * 16)
+		w = h * 16 / 9;       // wider than 16:9 (ultrawide): fit by height
+	if (w < 800) w = 800;
+	if (h < 600) h = 600;
+	w &= ~1;
+	h &= ~1;
+
+	if ((UnsignedInt)w == TheDisplay->getWidth() && (UnsignedInt)h == TheDisplay->getHeight())
+		return;
+
+	// Publish the new native mode first so d3d8webgl mode enumeration (and the
+	// options menu resolution list) stays consistent with the new size.
+	d3d8webgl_set_native_mode(w, h);
+
+	if (TheDisplay->setDisplayMode(w, h, TheDisplay->getBitDepth(), TheDisplay->getWindowed()))
+	{
+		fprintf(stderr, "INFO: web resize: display mode -> %dx%d\n", w, h);
+		TheWritableGlobalData->m_xResolution = w;
+		TheWritableGlobalData->m_yResolution = h;
+		TheHeaderTemplateManager->onResolutionChanged();
+		TheMouse->onResolutionChanged();
+		TheShell->recreateWindowLayouts();
+		TheInGameUI->recreateControlBar();
+		TheInGameUI->refreshCustomUiResources();
+		TheTacticalView->setCameraHeightAboveGroundLimitsToDefault();
+		TheTacticalView->setZoomToMax();
+	}
+}
+#endif // __EMSCRIPTEN__
+
 /**
  * From GameEngine: update() - per-frame update
  */
 void SDL3GameEngine::update(void)
 {
 	pollSDL3Events();
+#ifdef __EMSCRIPTEN__
+	// Outside the render pass: safe point for a device reset + UI recreation.
+	gxWebMaybeApplyPendingResolution();
+#endif
 #if defined(TARGET_OS_IPHONE) && TARGET_OS_IPHONE
 	// Pause sim + render while backgrounded OR inactive (see iosLifecycleWatcher).
 	// Acquiring a Metal drawable in these windows fights iOS for the layer and,
@@ -908,13 +991,28 @@ void SDL3GameEngine::handleMouseWheelEvent(const SDL_MouseWheelEvent& event)
 void SDL3GameEngine::handleWindowEvent(const SDL_WindowEvent& event)
 {
 #ifdef __EMSCRIPTEN__
-	// Forward the resize to the d3d8webgl render pipeline so its
-	// backbuffer and viewport match the canvas (the user's browser
-	// window changed size).
+	// The browser viewport changed. The canvas/backbuffer follows the window
+	// automatically every frame too (DX8Wrapper::Pillarbox_Process_Resize in
+	// W3DDisplay::draw), but that depends on BackBufferWidth/Height bookkeeping
+	// that only converges on the NEXT frame; resize here directly for
+	// immediate visual feedback (same as before the resolution-adoption
+	// feature), and additionally schedule the real display-mode change,
+	// applied debounced in update() once the size settles.
 	if (event.type == SDL_EVENT_WINDOW_RESIZED) {
 		int w = 0, h = 0;
 		SDL_GetWindowSizeInPixels(TheSDL3Window, &w, &h);
-		d3d8webgl_resize(w & ~1, h & ~1);
+		// GeneralsX @feature caiiiycuk 14/08/2026 HiDPI: match WebMain's
+		// physical-pixel canvas sizing (CSS size * devicePixelRatio, capped 2x).
+		double dpr = MAIN_THREAD_EM_ASM_DOUBLE({
+			return Math.min(window.devicePixelRatio || 1, 2);
+		});
+		if (dpr < 1.0) dpr = 1.0;
+		int physW = ((int)(w * dpr)) & ~1;
+		int physH = ((int)(h * dpr)) & ~1;
+		d3d8webgl_resize(physW, physH);
+		s_gxPendingResW = physW;
+		s_gxPendingResH = physH;
+		s_gxPendingResTick = SDL_GetTicks();
 	}
 #endif
 }

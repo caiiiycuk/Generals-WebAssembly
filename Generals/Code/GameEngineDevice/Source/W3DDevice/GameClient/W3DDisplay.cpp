@@ -456,6 +456,9 @@ inline Bool isResolutionSupported(const ResolutionDescClass &res)
 
 // SDL3 display size providers for DX8Wrapper pillarbox (registered at init)
 #ifdef SAGE_USE_SDL3
+#ifdef __EMSCRIPTEN__
+#include <emscripten/em_asm.h> // MAIN_THREAD_EM_ASM_DOUBLE (HiDPI window size)
+#endif
 static bool SDL3_GetNativeDisplaySize(int& outW, int& outH, float& outDensity)
 {
 	extern SDL_Window* TheSDL3Window;
@@ -477,6 +480,29 @@ static bool SDL3_GetWindowSizeInPixels(int& outW, int& outH, float& outDensity)
 	SDL_GetWindowSize(TheSDL3Window, &logW, &logH);
 	SDL_GetWindowSizeInPixels(TheSDL3Window, &physW, &physH);
 	if (physW <= 0 || physH <= 0) return false;
+#ifdef __EMSCRIPTEN__
+	// GeneralsX @bugfix caiiiycuk 14/08/2026 On the web SDL reports the canvas
+	// CSS size, but the real backbuffer (canvas backing store) is physical
+	// pixels. Scale by devicePixelRatio (capped at 2x, matching WebMain's
+	// HiDPI sizing) so Pillarbox_Process_Resize keeps the canvas at physical
+	// resolution instead of collapsing it back to CSS pixels every frame.
+	// The ratio is cached and re-read only when the CSS size changes, since
+	// this runs per frame and MAIN_THREAD_EM_ASM proxies to the browser thread.
+	{
+		static int s_lastLogW = -1, s_lastLogH = -1;
+		static double s_dpr = 1.0;
+		if (logW != s_lastLogW || logH != s_lastLogH) {
+			s_dpr = MAIN_THREAD_EM_ASM_DOUBLE({
+				return Math.min(window.devicePixelRatio || 1, 2);
+			});
+			if (s_dpr < 1.0) s_dpr = 1.0;
+			s_lastLogW = logW;
+			s_lastLogH = logH;
+		}
+		physW = ((int)(physW * s_dpr)) & ~1;
+		physH = ((int)(physH * s_dpr)) & ~1;
+	}
+#endif
 	outW = physW;
 	outH = physH;
 	outDensity = (logW > 0) ? (float)physW / (float)logW : 1.0f;
@@ -484,6 +510,7 @@ static bool SDL3_GetWindowSizeInPixels(int& outW, int& outH, float& outDensity)
 }
 
 // GeneralsX @bugfix GitHub Copilot 28/04/2026 Ensure SDL3 fullscreen transition actually lands in native fullscreen and foreground.
+#ifndef __EMSCRIPTEN__
 static void SDL3_EnsureNativeFullscreen(SDL_Window* window)
 {
 	if (!window) return;
@@ -501,6 +528,7 @@ static void SDL3_EnsureNativeFullscreen(SDL_Window* window)
 
 	SDL_RaiseWindow(window);
 }
+#endif // !__EMSCRIPTEN__
 
 // GeneralsX @bugfix GitHub Copilot 27/04/2026 Apply SDL3 window sizing/fullscreen only after the final render resolution is known.
 static void SDL3_ApplyWindowModeForRenderConfig(Bool windowed, Int renderWidth, Int renderHeight)
@@ -508,6 +536,20 @@ static void SDL3_ApplyWindowModeForRenderConfig(Bool windowed, Int renderWidth, 
 	extern SDL_Window* TheSDL3Window;
 	if (!TheSDL3Window) return;
 
+#ifdef __EMSCRIPTEN__
+	// GeneralsX @bugfix caiiiycuk 14/08/2026 Never drive SDL fullscreen (or
+	// resize the window) on the web. Browsers only grant fullscreen from a
+	// user gesture, so the startup request fails - and along the way SDL
+	// rewrote the canvas size with its CSS-pixel notion, fighting the
+	// physical-pixel (HiDPI) sizing done by d3d8webgl: the menu rendered into
+	// a corner of the canvas until the first browser resize. The canvas
+	// already fills the viewport (100vw/100vh); fullscreen stays the
+	// browser's own F11.
+	(void)windowed;
+	(void)renderWidth;
+	(void)renderHeight;
+	return;
+#else
 	if (!windowed) {
 		if (!SDL_SetWindowFullscreen(TheSDL3Window, false)) {
 			fprintf(stderr, "WARNING: SDL_SetWindowFullscreen(false) failed: %s\n", SDL_GetError());
@@ -536,6 +578,7 @@ static void SDL3_ApplyWindowModeForRenderConfig(Bool windowed, Int renderWidth, 
 		}
 		SDL3_EnsureNativeFullscreen(TheSDL3Window);
 	}
+#endif // __EMSCRIPTEN__
 }
 #endif
 

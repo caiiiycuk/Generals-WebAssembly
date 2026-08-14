@@ -638,6 +638,18 @@ int main(int argc, char* argv[])
 				}
 				int winW = 0, winH = 0;
 				SDL_GetWindowSizeInPixels(TheSDL3Window, &winW, &winH);
+				// GeneralsX @feature caiiiycuk 14/08/2026 HiDPI: SDL reports the
+				// canvas CSS size; render at physical-pixel resolution instead
+				// (devicePixelRatio, capped at 2x to bound WebGL fill rate on 4K
+				// displays). The SDL window stays CSS-sized - mouse input keeps
+				// working because SDL3Mouse::scaleMouseCoordinates() maps window
+				// coordinates onto the internal resolution.
+				double dpr = MAIN_THREAD_EM_ASM_DOUBLE({
+					return Math.min(window.devicePixelRatio || 1, 2);
+				});
+				if (dpr < 1.0) dpr = 1.0;
+				winW = (int)(winW * dpr);
+				winH = (int)(winH * dpr);
 				// Publish the native mode to d3d8webgl BEFORE the device is
 				// created: DX8Wrapper only accepts a 32-bit backbuffer if mode
 				// enumeration contains this exact resolution (else the whole
