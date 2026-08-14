@@ -16,6 +16,10 @@
 #     ccgenerals/GameData/fonts/             (TrueType faces for the engine)
 #     ccgenerals/GameDataGenerals/           (base Generals, if present)
 #
+# Videos: the base game ships without any *.bik (the engine silently skips a
+# missing video), ZH only drops the startup intro (EA logo + sizzle reel);
+# ZH briefing/challenge videos are kept.
+#
 # Usage:
 #   scripts/web/prepare-assets.sh BUILD_NAME [OUT_DIR]
 #
@@ -45,6 +49,8 @@ if [ -d "$ZH" ]; then
         --exclude='.DS_Store' \
         --exclude='Thumbs.db' \
         --exclude='Data/Backup Scripts/' \
+        --exclude='Data/*/Movies/EA_LOGO*' \
+        --exclude='Data/*/Movies/sizzle_review*' \
         --include='*/' \
         --include='*.big' \
         --include='Data/**' \
@@ -64,6 +70,8 @@ if [ -d "$BASE" ]; then
         --exclude='.DS_Store' \
         --exclude='Thumbs.db' \
         --exclude='Data/Backup Scripts/' \
+        --exclude='*.bik' \
+        --exclude='*.BIK' \
         --include='*/' \
         --include='*.big' \
         --include='Data/**' \

@@ -31,6 +31,7 @@ mkdir -p "$WORK/files"
 
 # Copy ZH data
 # GeneralsX @tweak caiiiycuk 14/08/2026 Skip OS junk, redundant Backup Scripts and empty dirs (-m).
+# GeneralsX @tweak caiiiycuk 14/08/2026 Drop the startup intro (EA logo + sizzle reel), same as prepare-assets.sh.
 ZH="$DATADIR/GeneralsZH"
 if [ -d "$ZH" ]; then
     echo "==> Zero Hour: $ZH"
@@ -38,6 +39,8 @@ if [ -d "$ZH" ]; then
         --exclude='.DS_Store' \
         --exclude='Thumbs.db' \
         --exclude='Data/Backup Scripts/' \
+        --exclude='Data/*/Movies/EA_LOGO*' \
+        --exclude='Data/*/Movies/sizzle_review*' \
         --include='*/' \
         --include='*.big' \
         --include='Data/**' \
@@ -47,6 +50,7 @@ if [ -d "$ZH" ]; then
 fi
 
 # Copy base Generals data (prefixed with GameDataGenerals/)
+# GeneralsX @tweak caiiiycuk 14/08/2026 The base game ships without any videos (engine skips missing ones).
 BASE="$DATADIR/Generals"
 if [ -d "$BASE" ]; then
     echo "==> Base Generals: $BASE"
@@ -54,6 +58,8 @@ if [ -d "$BASE" ]; then
         --exclude='.DS_Store' \
         --exclude='Thumbs.db' \
         --exclude='Data/Backup Scripts/' \
+        --exclude='*.bik' \
+        --exclude='*.BIK' \
         --include='*/' \
         --include='*.big' \
         --include='Data/**' \

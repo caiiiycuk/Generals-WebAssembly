@@ -356,6 +356,21 @@ int main(int argc, char* argv[])
 	__argc = argc;
 	__argv = argv;
 
+	// GeneralsX @tweak caiiiycuk 14/08/2026 Web ships without any base-game
+	// videos, so force -nologo: a stale OPFS deployment may still contain the
+	// intro movies and would play them otherwise.
+	{
+		static char nologoFlag[] = "-nologo";
+		static char* argvNoLogo[64];
+		int n = 0;
+		for (int i = 0; i < __argc && n < 62; ++i)
+			argvNoLogo[n++] = __argv[i];
+		argvNoLogo[n++] = nologoFlag;
+		argvNoLogo[n] = nullptr;
+		__argv = argvNoLogo;
+		__argc = n;
+	}
+
 	fprintf(stderr, "=================================================\n");
 	fprintf(stderr, " Command & Conquer Generals (Web)\n");
 	fprintf(stderr, " Emscripten + SDL3 + d3d8webgl Build\n");
