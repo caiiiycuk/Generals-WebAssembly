@@ -329,6 +329,20 @@ static bool MountGameStorage()
 	// everything else (Data/, Maps/) resolves from the CWD.
 	setenv("CNC_GENERALS_PATH", GX_ASSET_DIR, 1);
 
+	// GeneralsX @feature caiiiycuk 14/08/2026 UI language from the URL (?lang=).
+	// The deployed data is an English install with Russian override archives
+	// on top (00Russian.big/0!Russian.big). Unless the page asks for ?lang=ru
+	// (game.js -> Module.gxLang), hide those archives from the engine
+	// (GX_SKIP_BIGS, see StdBIGFileSystem) so the same OPFS deployment also
+	// serves plain English.
+	const int langIsRu = MAIN_THREAD_EM_ASM_INT({
+		return (typeof Module !== 'undefined' && Module.gxLang === 'ru') ? 1 : 0;
+	});
+	if (!langIsRu) {
+		setenv("GX_SKIP_BIGS", "00RussianZH.big,00Russian.big,0!Russian.big", 1);
+		fprintf(stderr, "INFO: lang != ru -> Russian override archives hidden (GX_SKIP_BIGS)\n");
+	}
+
 	// User data: GlobalData::BuildUserDataPathFromRegistry() Linux/XDG branch
 	// yields $XDG_DATA_HOME/GeneralsX/Generals/.
 	setenv("XDG_DATA_HOME", GX_OPFS_BASE "/userdata", 1);

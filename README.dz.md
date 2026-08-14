@@ -111,10 +111,18 @@ scripts/web/make-dist.sh --skip-assets
 |---|---|---|
 | `?game=` | `zh` (Zero Hour, `GeneralsXZH.js/.wasm`) или `generals` (база, `GeneralsX.js/.wasm`) | `zh` |
 | `?fps=` | лимит FPS рендера, например `?fps=60` | `30` (оригинал) |
+| `?lang=` | `ru` — русская локализация; любое другое значение (или отсутствие) — английская | английский |
 | `?args=` | прочие флаги движка, например `?args=-noshellmap` | — |
 | `?storage=idb` | принудительный IndexedDB-фолбэк | OPFS |
 
-Пример: `https://host/?game=zh&fps=60`.
+Пример: `https://host/?game=zh&fps=60&lang=ru`.
+
+Про `?lang=`: данные `default_ru` — это английская установка с русским
+патчем поверх (оверрайд-архивы `00RussianZH.big`, `00Russian.big`,
+`0!Russian.big`; озвучка и так английская). Один и тот же деплой в OPFS
+обслуживает оба языка: без `?lang=ru` движок просто не загружает эти три
+архива (шелл передаёт `Module.gxLang`, `WebMain.cpp` выставляет
+`GX_SKIP_BIGS`, список читает `StdBIGFileSystem`).
 
 `?game=generals` запускает базовую игру (`GeneralsX.js/.wasm`): у неё свой
 web-вход (`Generals/Code/Main/WebMain.cpp`), рабочий каталог в OPFS —

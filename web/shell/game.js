@@ -18,6 +18,13 @@ function gxEngineName() {
   return game === 'generals' ? 'GeneralsX' : 'GeneralsXZH';
 }
 
+// UI language from the URL (?lang=ru keeps the Russian localization override
+// archives; anything else hides them, so the game runs in English).
+// GeneralsX @feature caiiiycuk 14/08/2026
+function gxLangParam() {
+  return new URLSearchParams(location.search).get('lang') || '';
+}
+
 // Render FPS limit from the URL (?fps=60); the engine's original rate is 30.
 function gxFpsParam() {
   const fps = parseInt(new URLSearchParams(location.search).get('fps') || '30', 10);
@@ -139,6 +146,9 @@ async function gxStartGame() {
       gxStorageMode: window.gxStorageKind === 'idb' ? 1 : 0,
       // Render FPS limit from the URL (?fps=60).
       gxFps: gxFpsParam(),
+      // UI language (?lang=ru -> Russian override archives stay visible).
+      // Read by WebMain.cpp (GX_SKIP_BIGS).
+      gxLang: gxLangParam(),
       print: (t) => console.log('[game]', t),
       printErr: (t) => {
         // Drop known per-frame spam (same filter the iOS port uses in its

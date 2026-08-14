@@ -648,6 +648,40 @@ void StdBIGFileSystem::closeAllArchiveFiles() {
 void StdBIGFileSystem::closeAllFiles() {
 }
 
+// GeneralsX @feature caiiiycuk 14/08/2026 Optional archive skip list.
+// GX_SKIP_BIGS holds comma-separated .big basenames (case-insensitive) that
+// must NOT be loaded. The web shell uses it to hide localization override
+// archives (e.g. 00RussianZH.big) when the page is opened without ?lang=ru,
+// so one deployed data set serves both languages.
+static Bool isSkippedBigFile(const char* path)
+{
+	const char* skipList = getenv("GX_SKIP_BIGS");
+	if (skipList == nullptr || skipList[0] == '\0')
+		return FALSE;
+
+	const char* base = path;
+	for (const char* p = path; *p != '\0'; ++p) {
+		if (*p == '/' || *p == '\\')
+			base = p + 1;
+	}
+
+	const char* entry = skipList;
+	while (*entry != '\0') {
+		const char* end = strchr(entry, ',');
+		const size_t len = (end != nullptr) ? (size_t)(end - entry) : strlen(entry);
+		char name[256] = { 0 };
+		if (len > 0 && len < sizeof(name)) {
+			memcpy(name, entry, len);
+			name[len] = '\0';
+			if (stricmp(name, base) == 0)
+				return TRUE;
+		}
+		entry = (end != nullptr) ? end + 1 : entry + len;
+	}
+
+	return FALSE;
+}
+
 Bool StdBIGFileSystem::loadBigFilesFromDirectory(AsciiString dir, AsciiString fileMask, Bool overwrite) {
 
 	FilenameList filenameList;
@@ -665,6 +699,13 @@ Bool StdBIGFileSystem::loadBigFilesFromDirectory(AsciiString dir, AsciiString fi
 			continue;
 		}
 #endif
+
+		// GeneralsX @feature caiiiycuk 14/08/2026 Honor the GX_SKIP_BIGS skip list (web ?lang= support).
+		if (isSkippedBigFile((*it).str())) {
+			DEBUG_LOG(("StdBIGFileSystem::loadBigFilesFromDirectory - skipping %s (GX_SKIP_BIGS).", (*it).str()));
+			it++;
+			continue;
+		}
 
 		ArchiveFile *archiveFile = openArchiveFile((*it).str());
 
