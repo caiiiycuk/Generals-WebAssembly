@@ -50,6 +50,8 @@
 #include <cstring>
 #include <cstdio>
 #include <string>
+#include <map>        // userdata write-back change cache
+#include <vector>     // userdata write-back path list
 #include <unistd.h>   // _exit(), chdir()
 #include <sys/stat.h>
 #include <dirent.h>   // userdata write-back walk
@@ -119,6 +121,13 @@ GameEngine *CreateGameEngine(void)
 // subdirectory (ccgenerals/) instead of the shared origin-wide OPFS root.
 // The torrent deployer and the JS shell (storage.js) use the same base.
 #define GX_OPFS_BASE "/opfs/ccgenerals"
+
+// GeneralsX @feature caiiiycuk 14/08/2026 Userdata (Options.ini, saves,
+// replays) lives on its own js-file mount backed by the gx-userdata IndexedDB
+// database (see storage.js) - separate from the torrent-deployed OPFS game
+// data, so asset redeploys and wipes never touch user files.
+#define GX_USER_BASE "/idb"
+#define GX_USER_DATA_DIR GX_USER_BASE "/userdata"
 
 /**
  * PopulateFromIdb
@@ -204,16 +213,122 @@ static bool PopulateFromIdb()
 }
 
 /**
+ * PopulateUserdataFromIdb
+ *
+ * Restore the userdata tree (Options.ini, saves, replays) from the
+ * gx-userdata IndexedDB database into the js-file mount at GX_USER_DATA_DIR.
+ * The JS loader has materialized the files as ArrayBuffers on
+ * window.gxUserFiles (main thread) before the module started.
+ * Returns the number of files restored.
+ *
+ * GeneralsX @feature caiiiycuk 14/08/2026
+ */
+static int PopulateUserdataFromIdb()
+{
+	const int fileCount = MAIN_THREAD_EM_ASM_INT({
+		return (typeof window !== 'undefined' && window.gxUserFiles) ? window.gxUserFiles.length : 0;
+	});
+
+	char pathBuf[1024];
+	int restored = 0;
+	for (int i = 0; i < fileCount; i++) {
+		MAIN_THREAD_EM_ASM({
+			stringToUTF8(window.gxUserFiles[$0].path, $1, $2);
+		}, i, pathBuf, (int)sizeof(pathBuf));
+
+		const double sizeD = MAIN_THREAD_EM_ASM_DOUBLE({
+			return window.gxUserFiles[$0].data.byteLength;
+		}, i);
+		const size_t size = (size_t)sizeD;
+
+		std::string full = std::string(GX_USER_DATA_DIR "/") + pathBuf;
+		for (size_t p = strlen(GX_USER_BASE) + 1; p < full.size(); p++) {
+			if (full[p] == '/') {
+				mkdir(full.substr(0, p).c_str(), 0777);
+			}
+		}
+
+		FILE *fp = fopen(full.c_str(), "wb");
+		if (!fp) {
+			fprintf(stderr, "WARNING: cannot restore userdata file %s\n", full.c_str());
+			continue;
+		}
+		std::string bytes(size, '\0');
+		if (size > 0) {
+			MAIN_THREAD_EM_ASM({
+				HEAPU8.set(new Uint8Array(window.gxUserFiles[$0].data), $1);
+			}, i, &bytes[0]);
+		}
+		if (size == 0 || fwrite(bytes.data(), 1, size, fp) == size) {
+			restored++;
+		}
+		fclose(fp);
+	}
+
+	MAIN_THREAD_EM_ASM({ window.gxUserFiles = null; });
+	if (restored > 0) {
+		fprintf(stderr, "INFO: restored %d userdata file(s) from IndexedDB\n", restored);
+	}
+	return restored;
+}
+
+/**
+ * MigrateLegacyUserdata
+ *
+ * One-time migration: older builds kept userdata inside the OPFS game-data
+ * tree (GX_OPFS_BASE/userdata). Copy it into the IndexedDB-backed mount; the
+ * periodic write-back then persists it into gx-userdata.
+ *
+ * GeneralsX @feature caiiiycuk 14/08/2026
+ */
+static void MigrateLegacyUserdata(const std::string &src, const std::string &dst)
+{
+	DIR *d = opendir(src.c_str());
+	if (!d) return;
+	mkdir(dst.c_str(), 0777);
+	while (struct dirent *e = readdir(d)) {
+		if (e->d_name[0] == '.') continue;
+		const std::string s = src + "/" + e->d_name;
+		const std::string t = dst + "/" + e->d_name;
+		struct stat st;
+		if (stat(s.c_str(), &st) != 0) continue;
+		if (S_ISDIR(st.st_mode)) {
+			MigrateLegacyUserdata(s, t);
+			continue;
+		}
+		FILE *in = fopen(s.c_str(), "rb");
+		if (!in) continue;
+		FILE *out = fopen(t.c_str(), "wb");
+		if (!out) { fclose(in); continue; }
+		char buf[65536];
+		size_t n;
+		while ((n = fread(buf, 1, sizeof(buf), in)) > 0) {
+			fwrite(buf, 1, n, out);
+		}
+		fclose(in);
+		fclose(out);
+		fprintf(stderr, "INFO: migrated legacy userdata file %s\n", t.c_str());
+	}
+	closedir(d);
+}
+
+/**
  * gxWebPeriodic
  *
- * Called once per frame from the GameEngine web tick. In IndexedDB mode the
- * js-file backend is session-local, so every ~20s we push the userdata tree
- * (saves, Options.ini, replays) back to IndexedDB via window.gxIdbPutUserFile;
- * the loader restores it into GX_OPFS_BASE/userdata on the next boot.
+ * Called once per frame from the GameEngine web tick. The userdata mount is a
+ * session-local js-file backend, so every ~10s (and once more on quit via
+ * gxWebFlushUserdata) changed files are pushed back to the gx-userdata
+ * IndexedDB database via window.gxIdbPutUserFile, and files deleted in-game
+ * are pruned via window.gxIdbPruneUserFiles.
  */
 static bool s_gxIdbMode = false;
 
-static void GxBackupUserdataDir(const std::string &dir, const std::string &rel)
+// (size, mtime) per relative path: skip unchanged files so the periodic
+// write-back pass stays cheap.
+static std::map<std::string, std::pair<long long, long long> > s_gxUserBackupCache;
+
+static void GxBackupUserdataDir(const std::string &dir, const std::string &rel,
+                                std::vector<std::string> &seen, bool &changed)
 {
 	DIR *d = opendir(dir.c_str());
 	if (!d) return;
@@ -224,9 +339,13 @@ static void GxBackupUserdataDir(const std::string &dir, const std::string &rel)
 		struct stat st;
 		if (stat(full.c_str(), &st) != 0) continue;
 		if (S_ISDIR(st.st_mode)) {
-			GxBackupUserdataDir(full, relPath);
+			GxBackupUserdataDir(full, relPath, seen, changed);
 			continue;
 		}
+		seen.push_back(relPath);
+		const std::pair<long long, long long> sig((long long)st.st_size, (long long)st.st_mtime);
+		std::map<std::string, std::pair<long long, long long> >::iterator it = s_gxUserBackupCache.find(relPath);
+		if (it != s_gxUserBackupCache.end() && it->second == sig) continue;
 		FILE *fp = fopen(full.c_str(), "rb");
 		if (!fp) continue;
 		std::string bytes((size_t)st.st_size, '\0');
@@ -238,8 +357,44 @@ static void GxBackupUserdataDir(const std::string &dir, const std::string &rel)
 				window.gxIdbPutUserFile(UTF8ToString($0), HEAPU8.slice($1, $1 + $2));
 			}
 		}, relPath.c_str(), bytes.data(), (int)bytes.size());
+		s_gxUserBackupCache[relPath] = sig;
+		changed = true;
 	}
 	closedir(d);
+}
+
+// Full write-back pass: push changed files into gx-userdata and prune records
+// whose files were deleted in-game (saves, replays). Also called from the
+// GameEngine web tick right before quit (_exit) for a final flush.
+extern "C" void gxWebFlushUserdata(void)
+{
+	std::vector<std::string> seen;
+	bool changed = false;
+	GxBackupUserdataDir(GX_USER_DATA_DIR, "", seen, changed);
+	if (seen.size() != s_gxUserBackupCache.size()) changed = true;
+	if (!changed) return;
+
+	// Drop cache entries for files that no longer exist, then let JS prune
+	// the IndexedDB records not on the survivor list.
+	std::map<std::string, std::pair<long long, long long> >::iterator it = s_gxUserBackupCache.begin();
+	while (it != s_gxUserBackupCache.end()) {
+		bool found = false;
+		for (size_t i = 0; i < seen.size(); i++) {
+			if (seen[i] == it->first) { found = true; break; }
+		}
+		if (!found) s_gxUserBackupCache.erase(it++);
+		else ++it;
+	}
+	std::string joined;
+	for (size_t i = 0; i < seen.size(); i++) {
+		joined += seen[i];
+		joined += '\n';
+	}
+	MAIN_THREAD_EM_ASM({
+		if (window.gxIdbPruneUserFiles) {
+			window.gxIdbPruneUserFiles(UTF8ToString($0).split('\n').filter(Boolean));
+		}
+	}, joined.c_str());
 }
 
 extern "C" void gxWebPeriodic(void)
@@ -257,12 +412,11 @@ extern "C" void gxWebPeriodic(void)
 		}
 	}
 
-	if (!s_gxIdbMode) return;
 	static double s_last = 0.0;
 	const double now = emscripten_get_now();
-	if (now - s_last < 20000.0) return; // every ~20s
+	if (now - s_last < 10000.0) return; // every ~10s
 	s_last = now;
-	GxBackupUserdataDir(GX_OPFS_BASE "/userdata", "");
+	gxWebFlushUserdata();
 }
 
 /**
@@ -342,10 +496,25 @@ static bool MountGameStorage()
 		fprintf(stderr, "INFO: lang != ru -> Russian override archives hidden (GX_SKIP_BIGS)\n");
 	}
 
+	// GeneralsX @feature caiiiycuk 14/08/2026 Userdata mount: js-file backend
+	// at GX_USER_BASE, persisted in the gx-userdata IndexedDB database. The JS
+	// loader restored the files into window.gxUserFiles before the module
+	// started; gxWebPeriodic() writes changes back every ~10s plus a final
+	// flush on quit.
+	backend_t userBackend = wasmfs_create_js_file_backend();
+	if (userBackend == nullptr || wasmfs_create_directory(GX_USER_BASE, 0777, userBackend) != 0) {
+		fprintf(stderr, "FATAL: mounting userdata storage at " GX_USER_BASE " failed\n");
+		return false;
+	}
+	mkdir(GX_USER_DATA_DIR, 0777);
+	if (PopulateUserdataFromIdb() == 0) {
+		// One-time migration: older builds kept userdata inside the OPFS tree.
+		MigrateLegacyUserdata(GX_OPFS_BASE "/userdata", GX_USER_DATA_DIR);
+	}
+
 	// User data: GlobalData::BuildUserDataPathFromRegistry() Linux/XDG branch
 	// yields $XDG_DATA_HOME/GeneralsX/GeneralsZH/.
-	setenv("XDG_DATA_HOME", GX_OPFS_BASE "/userdata", 1);
-	mkdir(GX_OPFS_BASE "/userdata", 0777); // harmless if the JS loader already made it
+	setenv("XDG_DATA_HOME", GX_USER_DATA_DIR, 1);
 
 	if (chdir(GX_OPFS_BASE "/GameData") != 0) {
 		fprintf(stderr, "WARNING: chdir(" GX_OPFS_BASE "/GameData) failed - assets not deployed yet?\n");

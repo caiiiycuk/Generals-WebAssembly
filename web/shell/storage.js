@@ -305,4 +305,82 @@ class IdbStorage {
   }
 }
 
+// ---------------------------------------------------------------------------
+// Userdata store (gx-userdata) - Options.ini, saves, replays.
+//
+// A separate IndexedDB database, independent from game assets: OPFS holds
+// only the torrent-deployed game data, so a redeploy or asset wipe never
+// touches user files. The engine mounts a WASMFS js-file backend at
+// /idb/userdata (classic emscripten IDBFS is unavailable under -sWASMFS,
+// which the OPFS asset backend requires), restores it from here at boot
+// (window.gxUserFiles) and syncs changes back through
+// window.gxIdbPutUserFile / window.gxIdbPruneUserFiles - the same
+// mount+syncfs semantics IDBFS provides on the legacy FS.
+//
+// GeneralsX @feature caiiiycuk 14/08/2026
+// ---------------------------------------------------------------------------
+
+const GX_USER_DB = 'gx-userdata';
+const GX_USER_STORE = 'files';
+
+function gxUserDbOpen() {
+  return new Promise((resolve, reject) => {
+    const req = indexedDB.open(GX_USER_DB, 1);
+    req.onupgradeneeded = () => {
+      if (!req.result.objectStoreNames.contains(GX_USER_STORE))
+        req.result.createObjectStore(GX_USER_STORE);
+    };
+    req.onsuccess = () => resolve(req.result);
+    req.onerror = () => reject(req.error);
+  });
+}
+
+const gxUserStore = {
+  _db: null,
+  async _store(mode) {
+    if (!this._db) this._db = await gxUserDbOpen();
+    return this._db.transaction(GX_USER_STORE, mode).objectStore(GX_USER_STORE);
+  },
+  _req(r) {
+    return new Promise((res, rej) => {
+      r.onsuccess = () => res(r.result);
+      r.onerror = () => rej(r.error);
+    });
+  },
+  // Every stored file as [{path, data:ArrayBuffer}] - the engine copies them
+  // into its /idb/userdata mount at boot.
+  async readAll() {
+    try {
+      const st = await this._store('readonly');
+      const [keys, blobs] = await Promise.all([this._req(st.getAllKeys()), this._req(st.getAll())]);
+      const out = [];
+      for (let i = 0; i < keys.length; i++) {
+        if (blobs[i]) out.push({ path: keys[i], data: await blobs[i].arrayBuffer() });
+      }
+      return out;
+    } catch (e) {
+      console.warn('[storage] userdata restore failed:', e);
+      return [];
+    }
+  },
+  put(path, bytes) {
+    return this._store('readwrite')
+      .then((st) => this._req(st.put(new Blob([bytes]), path)))
+      .catch((e) => console.warn('[storage] userdata write-back failed:', path, e));
+  },
+  // Delete records whose path is not on the survivor list (files removed
+  // in-game: saves, replays).
+  async prune(keepPaths) {
+    try {
+      const keep = new Set(keepPaths);
+      const st = await this._store('readwrite');
+      const keys = await this._req(st.getAllKeys());
+      for (const k of keys) if (!keep.has(k)) st.delete(k);
+    } catch (e) {
+      console.warn('[storage] userdata prune failed:', e);
+    }
+  },
+};
+
+window.gxUserStore = gxUserStore;
 window.gxDetectStorage = gxDetectStorage;

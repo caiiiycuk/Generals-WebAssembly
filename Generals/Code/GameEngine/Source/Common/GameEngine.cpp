@@ -841,6 +841,7 @@ extern HWND ApplicationHWnd;
 #ifdef __EMSCRIPTEN__
 #include <emscripten.h>
 extern "C" void gxWebPeriodic(void); // WebMain.cpp: IDB userdata write-back
+extern "C" void gxWebFlushUserdata(void); // WebMain.cpp: final userdata flush before quit
 /** -----------------------------------------------------------------------------------------------
  * Web main loop. OffscreenCanvas frames only reach the screen when this
  * pthread yields to its event loop, so a blocking while() would render a
@@ -864,6 +865,10 @@ void GameEngine::execute()
 			// are already in OPFS, so the relaunch is quick. Done on the main
 			// thread directly (Module.onExit is unreliable under
 			// PROXY_TO_PTHREAD + _exit).
+			// GeneralsX @feature caiiiycuk 14/08/2026 Push the last userdata
+			// changes (Options.ini, saves) into IndexedDB before the runtime
+			// dies - the periodic ~10s write-back may not have run yet.
+			gxWebFlushUserdata();
 			MAIN_THREAD_EM_ASM({
 				if (typeof gxOnEngineExit === 'function') gxOnEngineExit();
 				else location.reload();

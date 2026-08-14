@@ -207,10 +207,6 @@ async function gxMaterializeIdb(storage) {
   }
   gxUI.unpack(assetPaths.length, assetPaths.length);
   window.gxFiles = files;
-  window.gxIdbPutUserFile = (path, bytes) => {
-    storage.writeBlob('userdata/' + path, new Blob([bytes])).catch(e =>
-      console.warn('[loader] userdata write-back failed:', path, e));
-  };
 }
 
 // Wipe every browser-side store this app uses: OPFS (game files, meta,
@@ -329,6 +325,14 @@ async function gxBoot() {
       gxUI.status('loader.files');
       await gxMaterializeIdb(storage);
     }
+
+    // Userdata (Options.ini, saves, replays) lives in its own IndexedDB
+    // database (gx-userdata), mounted by the engine at /idb/userdata:
+    // restore it and expose the write-back hooks (see WebMain.cpp).
+    // GeneralsX @feature caiiiycuk 14/08/2026
+    window.gxUserFiles = await window.gxUserStore.readAll();
+    window.gxIdbPutUserFile = (path, bytes) => window.gxUserStore.put(path, bytes);
+    window.gxIdbPruneUserFiles = (paths) => window.gxUserStore.prune(paths);
 
     gxUI.status('loader.starting');
     document.getElementById('gx-progress-wrap').style.display = 'none';

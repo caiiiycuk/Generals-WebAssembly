@@ -81,11 +81,20 @@ web/staging/<BUILD_NAME>/          =  корень OPFS
     GameDataGenerals/              <- базовая игра (сиблинг GameData/)
 ```
 
-(`ccgenerals/userdata/` создаст сама игра — сохранения, `Options.ini`,
-реплеи. Движок монтирует OPFS в `/opfs` и работает в
-`/opfs/ccgenerals/GameData`; база — в `/opfs/ccgenerals/GameDataGenerals`.
-Константа базового пути — `GX_OPFS_BASE` в `WebMain.cpp`, JS-слой якорится
-на тот же подкаталог в `storage.js`.)
+(Движок монтирует OPFS в `/opfs` и работает в `/opfs/ccgenerals/GameData`;
+база — в `/opfs/ccgenerals/GameDataGenerals`. Константа базового пути —
+`GX_OPFS_BASE` в `WebMain.cpp`, JS-слой якорится на тот же подкаталог в
+`storage.js`.)
+
+Пользовательские данные (`Options.ini`, сохранения, реплеи) в OPFS **не
+живут**: они хранятся в отдельной базе IndexedDB `gx-userdata` и монтируются
+движком в `/idb/userdata` (классический IDBFS несовместим с `-s WASMFS`,
+поэтому та же семантика mount+syncfs реализована поверх WASMFS: лоадер
+восстанавливает файлы при старте, движок синхронизирует изменения обратно
+каждые ~10 с и перед выходом). Благодаря этому повторный деплой или очистка
+игровых данных в OPFS никогда не трогает сохранения. Userdata из старых
+установок (`ccgenerals/userdata/` в OPFS) мигрируется автоматически при
+первом запуске.
 
 Полученную директорию `web/staging/<BUILD_NAME>` нужно **обернуть в
 торрент**; деплоер разворачивает её содержимое в корень OPFS браузера
@@ -173,5 +182,6 @@ cd web && go run ./server -dir ./dist -tls-self-signed   # https://<ip>:8080
 - `gxWipeAllStorage()` в консоли devtools — сброс OPFS, IndexedDB,
   Cache Storage и настроек (эквивалент «переустановки»);
 - раскладка внутри OPFS, которую ожидает движок: `/opfs/ccgenerals/GameData`
-  (ассеты ZH, рабочий каталог), `/opfs/ccgenerals/GameDataGenerals` (база),
-  `/opfs/ccgenerals/userdata` (сохранения, `Options.ini`, реплеи).
+  (ассеты ZH, рабочий каталог), `/opfs/ccgenerals/GameDataGenerals` (база);
+- сохранения, `Options.ini` и реплеи — НЕ в OPFS, а в IndexedDB-базе
+  `gx-userdata` (движок монтирует её содержимое в `/idb/userdata`);
