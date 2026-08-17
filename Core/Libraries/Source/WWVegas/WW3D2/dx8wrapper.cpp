@@ -172,6 +172,19 @@ bool DX8Wrapper::Pillarbox_Setup(int gameW, int gameH)
 				density = 1.0f;
 			}
 		}
+	} else {
+		// GeneralsX @bugfix caiiiycuk 14/08/2026 BackBufferWidth/Height already
+		// reflect the real backbuffer (see the comment above) so this branch
+		// never touches bbW/bbH, but it left `density` at its 1.0 default even
+		// on HiDPI displays - Pillarbox_Get_Rect divides the physical fit rect
+		// by `density` to hand mouse hit-testing a CSS-pixel viewport, so a
+		// stale 1.0 there made every click land at roughly half its real
+		// position at 2x devicePixelRatio. Query density alone (size outputs
+		// discarded) from the same provider used above.
+		int unusedW = 0, unusedH = 0;
+		if (!GetWindowSize(unusedW, unusedH, density)) {
+			GetNativeDisplaySize(unusedW, unusedH, density);
+		}
 	}
 
 	// No pillarbox needed if backbuffer matches game resolution
