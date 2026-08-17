@@ -108,7 +108,11 @@ private:
 	GLuint m_curFBO = 0;
 	int m_curRTWidth = 0;
 	int m_curRTHeight = 0;
-	float m_yFlip = 1.0f; // +1 backbuffer (flip), -1 FBO (no flip)
+	// Sign applied to clip-space y: +1 for the canvas (presented as rendered),
+	// -1 for a render target (rendered mirrored so that texel row 0 holds the
+	// D3D top row, which is what sampling it with v=0 = top expects). Also
+	// decides the D3D->GL cull mapping and the viewport/scissor y convention.
+	float m_yFlip = 1.0f;
 	GLuint m_depthRB = 0; // shared depth-stencil renderbuffer for FBOs
 	int m_depthRBW = 0, m_depthRBH = 0;
 

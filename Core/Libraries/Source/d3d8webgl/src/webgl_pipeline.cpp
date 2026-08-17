@@ -567,7 +567,7 @@ WebGLPipeline::ProgramInfo *WebGLPipeline::getProgram(WebGLDevice *dev, unsigned
 	}
 	vs += "uniform mat4 uWorld, uView, uProj;\n";
 	vs += "uniform vec4 uViewportPos;\n"; // x, y, w, h
-	vs += "uniform float uYFlip;\n"; // +1 backbuffer, -1 render-to-texture
+	vs += "uniform float uYFlip;\n"; // +1 canvas (no mirror), -1 render target (mirror)
 	vs += "uniform mat4 uTexMat0, uTexMat1;\n";
 	vs += "out vec4 vCol;\nout vec4 vSpec;\nout vec2 vUV0;\nout vec2 vUV1;\nout float vFogDepth;\n";
 	if (lighting) {
@@ -587,8 +587,10 @@ WebGLPipeline::ProgramInfo *WebGLPipeline::getProgram(WebGLDevice *dev, unsigned
 		vs += "  vec4 wpos = uWorld * vec4(aPos, 1.0);\n";
 		vs += "  vec4 vpos = uView * wpos;\n";
 		vs += "  vec4 cpos = uProj * vpos;\n";
-		// D3D clip z in [0,w] -> GL [-w,w]; screen y flip.
-		vs += "  gl_Position = vec4(cpos.x, -cpos.y * uYFlip, cpos.z * 2.0 - cpos.w, cpos.w);\n";
+		// D3D clip z in [0,w] -> GL [-w,w]. Clip y needs no flip of its own (D3D and
+		// GL both point +y up in clip space); uYFlip alone mirrors the frame when the
+		// target is a render target that the pillarbox blit will sample.
+		vs += "  gl_Position = vec4(cpos.x, cpos.y * uYFlip, cpos.z * 2.0 - cpos.w, cpos.w);\n";
 		vs += "  vFogDepth = -vpos.z;\n";
 	}
 	// Diffuse color: vertex color (BGRA attribute swizzle) / lighting / white.
@@ -1034,17 +1036,28 @@ void WebGLPipeline::applyFixedState(WebGLDevice *dev)
 		glDisable(GL_BLEND);
 	}
 
-	// Cull. The uniform clip-space y-negate flips winding exactly once
-	// relative to D3D screen space, so with glFrontFace(GL_CCW):
-	// D3D-CW-culled triangles are GL front faces and vice versa.
+	// Cull. D3D decides facing in screen space, so how D3D winding maps to GL
+	// winding depends on the sign our clip-space y carries - and that sign is per
+	// target (see m_yFlip in setRenderTarget): a render target is rendered
+	// mirrored, the canvas is not. Mirroring reverses triangle orientation exactly
+	// once, so the two cases are opposites.
+	// GeneralsX @bugfix caiiiycuk 17/08/2026 This mapping used to be fixed at the
+	// render-target case, which culled canvas-rendered geometry inside out (the
+	// scene looked like it was viewed from behind - water drawn over vehicles).
+	// Note the pre-transformed (XYZRHW) path carries the opposite relation, but
+	// every XYZRHW draw in the engine and in the pillarbox blit runs with
+	// D3DCULL_NONE, so it is unaffected either way.
+	const bool mirroredTarget = (m_yFlip < 0.0f);
+	const GLenum cullD3DCW = mirroredTarget ? GL_FRONT : GL_BACK;
+	const GLenum cullD3DCCW = mirroredTarget ? GL_BACK : GL_FRONT;
 	switch (dev->getRenderState(D3DRS_CULLMODE)) {
 	case D3DCULL_CW:
 		glEnable(GL_CULL_FACE);
-		glCullFace(GL_FRONT);
+		glCullFace(cullD3DCW);
 		break;
 	case D3DCULL_CCW:
 		glEnable(GL_CULL_FACE);
-		glCullFace(GL_BACK);
+		glCullFace(cullD3DCCW);
 		break;
 	default:
 		glDisable(GL_CULL_FACE);
@@ -1081,15 +1094,24 @@ void WebGLPipeline::applyFixedState(WebGLDevice *dev)
 		glDisable(GL_STENCIL_TEST);
 	}
 
-	// Viewport position. The uniform clip-space y-negate makes every render
-	// target D3D-oriented (texel row 0 = top row of the D3D frame), so the
-	// viewport rectangle must be placed from the TOP, i.e. at vp.Y directly.
-	// The classic GL bottom-up flip here double-flipped partial viewports:
-	// full-screen ones (Y=0, H=RT) are unaffected, but the in-game 3D view
-	// (top portion of the screen) rendered shifted DOWN by RTH-H, leaving a
-	// black band on top and offsetting picking by the same amount.
+	// Viewport position. D3D counts vp.Y from the top of the target, GL from the
+	// bottom, so the conversion depends on how the frame is stored - which differs
+	// per target (see m_yFlip in setRenderTarget):
+	// - render target (m_yFlip = -1): rendered mirrored on purpose, so texel row 0
+	//   holds the D3D top row and a band at D3D y lands at GL row vp.Y directly.
+	//   Placing it the classic GL way double-flipped partial viewports here: the
+	//   in-game 3D view rendered shifted DOWN by RTH-H, leaving a black band on
+	//   top and offsetting picking by the same amount.
+	// - canvas (m_yFlip = +1): stored the GL way (row 0 presented at the bottom),
+	//   so the band must be placed from the bottom.
+	// GeneralsX @bugfix caiiiycuk 17/08/2026 The from-the-top form used to be
+	// unconditional, which was only ever correct for render targets - the canvas
+	// path just never ran with a partial viewport until pillarbox could switch off.
 	const D3DVIEWPORT8 &vp = dev->getViewport();
-	glViewport((GLint)vp.X, (GLint)vp.Y, (GLsizei)vp.Width, (GLsizei)vp.Height);
+	const GLint glVpY = (m_yFlip < 0.0f)
+		? (GLint)vp.Y
+		: (GLint)(m_curRTHeight - (int)vp.Y - (int)vp.Height);
+	glViewport((GLint)vp.X, glVpY, (GLsizei)vp.Width, (GLsizei)vp.Height);
 	glDepthRangef(vp.MinZ, vp.MaxZ);
 }
 
@@ -1372,7 +1394,11 @@ void WebGLPipeline::clear(WebGLDevice *dev, unsigned flags, uint32_t argb, float
 	if (!full) {
 		glEnable(GL_SCISSOR_TEST);
 		// Same top-origin placement as the glViewport call in applyFixedState.
-		glScissor((GLint)vp.X, (GLint)vp.Y, (GLsizei)vp.Width, (GLsizei)vp.Height);
+		// Same top/bottom convention as glViewport in applyRenderStates.
+		const GLint scissorY = (m_yFlip < 0.0f)
+			? (GLint)vp.Y
+			: (GLint)(m_curRTHeight - (int)vp.Y - (int)vp.Height);
+		glScissor((GLint)vp.X, scissorY, (GLsizei)vp.Width, (GLsizei)vp.Height);
 	}
 
 	GLbitfield mask = 0;
@@ -1452,9 +1478,15 @@ void WebGLPipeline::setRenderTarget(WebGLDevice * /*dev*/, WebGLTexture *tex)
 	m_curFBO = tex->m_gl.fbo;
 	m_curRTWidth = w;
 	m_curRTHeight = h;
-	// Same y-flip as the backbuffer: D3D's top row then lands in texel row 0,
-	// which is exactly what engine UVs (v=0 = top) expect when sampling.
-	m_yFlip = 1.0f;
+	// GeneralsX @bugfix caiiiycuk 17/08/2026 A render target is consumed as a
+	// texture, and texel row 0 is sampled at v=0 - the opposite of the canvas,
+	// which presents drawing-buffer row 0 at the BOTTOM. So render targets are
+	// deliberately rendered mirrored: D3D's top row then lands in texel row 0,
+	// exactly what engine UVs (v=0 = top) expect when the pillarbox blit samples
+	// it. The canvas needs no such mirror; using the canvas sign here (and a
+	// hardcoded negate in the vertex shader) mirrored every canvas-rendered frame
+	// instead, which stayed hidden for as long as the pillarbox was always on.
+	m_yFlip = -1.0f;
 	// Rendered content supersedes the CPU shadow from now on.
 	tex->m_gl.dirty = false;
 }
