@@ -543,13 +543,37 @@ void SDL3GameEngine::reset(void)
 // delivers a burst of events) the engine switches to an internal resolution
 // matching the new viewport, using the same sequence the options menu runs
 // for a resolution change.
-static int s_gxPendingResW = 0;
-static int s_gxPendingResH = 0;
+static bool s_gxResizePending = false;
 static Uint64 s_gxPendingResTick = 0;
+
+// GeneralsX @bugfix caiiiycuk 17/08/2026 Physical size of the canvas backing
+// store, computed exactly like the DX8Wrapper pillarbox size provider
+// (SDL3_GetWindowSizeInPixels in W3DDisplay.cpp) and from the same window, so
+// the two never disagree by a pixel.
+static bool gxWebPhysicalWindowSize(int& outW, int& outH)
+{
+	extern SDL_Window* TheSDL3Window;
+	if (!TheSDL3Window)
+		return false;
+	int w = 0, h = 0;
+	SDL_GetWindowSizeInPixels(TheSDL3Window, &w, &h);
+	if (w <= 0 || h <= 0)
+		return false;
+	// HiDPI: match WebMain's physical-pixel canvas sizing (CSS size *
+	// devicePixelRatio, capped 2x).
+	double dpr = MAIN_THREAD_EM_ASM_DOUBLE({
+		return Math.min(window.devicePixelRatio || 1, 2);
+	});
+	if (dpr < 1.0)
+		dpr = 1.0;
+	outW = ((int)(w * dpr)) & ~1;
+	outH = ((int)(h * dpr)) & ~1;
+	return true;
+}
 
 static void gxWebMaybeApplyPendingResolution(void)
 {
-	if (s_gxPendingResW <= 0 || s_gxPendingResH <= 0)
+	if (!s_gxResizePending)
 		return;
 	if (SDL_GetTicks() - s_gxPendingResTick < 350)
 		return;
@@ -563,10 +587,16 @@ static void gxWebMaybeApplyPendingResolution(void)
 	if (TheGameLogic->isInGame() && TheGameLogic->getGameMode() != GAME_SHELL)
 		return;
 
-	int w = s_gxPendingResW;
-	int h = s_gxPendingResH;
-	s_gxPendingResW = 0;
-	s_gxPendingResH = 0;
+	// GeneralsX @bugfix caiiiycuk 17/08/2026 Re-read the size now instead of
+	// reusing the one captured with the event: with a fractional
+	// devicePixelRatio the browser can still settle a pixel or two away
+	// afterwards, and a stale value left the internal resolution slightly off
+	// the canvas. That kept the pillarbox (and its offscreen pass) permanently
+	// engaged instead of rendering straight to the canvas.
+	int w = 0, h = 0;
+	if (!gxWebPhysicalWindowSize(w, h))
+		return; // no window yet - retry on the next frame
+	s_gxResizePending = false;
 
 	// Clamp to the aspect range the game UI supports (4:3 .. 16:9, same rule
 	// as the options resolution list) and to the 800x600 GUI minimum; any
@@ -999,19 +1029,12 @@ void SDL3GameEngine::handleWindowEvent(const SDL_WindowEvent& event)
 	// feature), and additionally schedule the real display-mode change,
 	// applied debounced in update() once the size settles.
 	if (event.type == SDL_EVENT_WINDOW_RESIZED) {
-		int w = 0, h = 0;
-		SDL_GetWindowSizeInPixels(TheSDL3Window, &w, &h);
-		// GeneralsX @feature caiiiycuk 14/08/2026 HiDPI: match WebMain's
-		// physical-pixel canvas sizing (CSS size * devicePixelRatio, capped 2x).
-		double dpr = MAIN_THREAD_EM_ASM_DOUBLE({
-			return Math.min(window.devicePixelRatio || 1, 2);
-		});
-		if (dpr < 1.0) dpr = 1.0;
-		int physW = ((int)(w * dpr)) & ~1;
-		int physH = ((int)(h * dpr)) & ~1;
-		d3d8webgl_resize(physW, physH);
-		s_gxPendingResW = physW;
-		s_gxPendingResH = physH;
+		// GeneralsX @feature caiiiycuk 14/08/2026 HiDPI: the canvas backing store
+		// is sized in physical pixels (see gxWebPhysicalWindowSize).
+		int physW = 0, physH = 0;
+		if (gxWebPhysicalWindowSize(physW, physH))
+			d3d8webgl_resize(physW, physH);
+		s_gxResizePending = true;
 		s_gxPendingResTick = SDL_GetTicks();
 	}
 #endif
