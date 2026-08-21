@@ -326,6 +326,15 @@ async function gxBoot() {
       await gxMaterializeIdb(storage);
     }
 
+    // Initialize CloudSDK and finish any remote restore before materializing
+    // userdata for the wasm-side /idb/userdata mount. Reading gxUserFiles
+    // first would leave the engine with the pre-restore snapshot.
+    // GeneralsX @bugfix caiiiycuk 21/08/2026 Apply cloud userdata before engine startup.
+    await window.gxUserStore.ready();
+    if (typeof gxCloudInit === 'function') {
+      try { await gxCloudInit(); } catch(e) { console.warn('[loader] Cloud-init failed:', e); }
+    }
+
     // Userdata (Options.ini, saves, replays) lives in its own IndexedDB
     // database (gx-userdata), mounted by the engine at /idb/userdata:
     // restore it and expose the write-back hooks (see WebMain.cpp).

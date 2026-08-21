@@ -423,6 +423,13 @@ extern "C" void gxWebPeriodic(void)
 	if (now - s_last < 10000.0) return; // every ~10s
 	s_last = now;
 	gxWebFlushUserdata();
+
+	// GeneralsX @feature caiiiycuk 21/08/2026 Push userdata through CloudSDK periodically.
+	MAIN_THREAD_EM_ASM({
+		if (typeof window !== 'undefined' && window.gxCloudSync && window.gxCloudSync.pushPeriodic) {
+			window.gxCloudSync.pushPeriodic().catch(e => console.warn('[cloud-sync] periodic push failed:', e));
+		}
+	});
 }
 
 /**

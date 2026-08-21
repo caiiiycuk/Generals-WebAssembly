@@ -220,7 +220,16 @@ function gxOnEngineExit() {
       if (d) d.textContent = 'Возврат в меню…';
     }
   } catch {}
-  location.reload();
+
+  // The C++ exit path has just queued its final userdata write-back. Give the
+  // tracked IDB transactions and a final CloudSDK push a bounded opportunity
+  // to finish before reloading the shell.
+  // GeneralsX @feature caiiiycuk 21/08/2026 Flush the final cloud snapshot on exit.
+  const push = window.gxCloudSync && window.gxCloudSync.forcePushToStorage
+    ? window.gxCloudSync.forcePushToStorage()
+    : Promise.resolve(false);
+  const timeout = new Promise((resolve) => setTimeout(resolve, 5000));
+  Promise.race([Promise.resolve(push), timeout]).finally(() => location.reload());
 }
 
 window.gxStartGame = gxStartGame;
