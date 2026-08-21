@@ -32,10 +32,13 @@ if(MSVC)
     
     # /INCREMENTAL:NO prevents PDB size bloat in Debug configuration(s).
     add_link_options("/INCREMENTAL:NO")
-else()
+elseif(NOT EMSCRIPTEN)
     # We go a bit wild here and assume any other compiler we are going to use supports -g for debug info.
     # Add debug symbols to Release builds for crash dump analysis, profiling, and post-mortem debugging.
     # For MinGW, symbols will be stripped to separate .debug files (matching MSVC PDB workflow).
+    # The web release artifact ships directly to browsers: embedded DWARF adds
+    # tens of megabytes to the WASM and is intentionally kept only in the
+    # emscripten-debug preset.
     string(APPEND CMAKE_CXX_FLAGS_RELEASE " -g")
     string(APPEND CMAKE_C_FLAGS_RELEASE " -g")
 endif()

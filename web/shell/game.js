@@ -11,11 +11,43 @@
 // buildId, so gxStartGame() instantiates without any further network fetch.
 window.gxEngine = { wasmBinary: null, buildId: 'dev' };
 
+// A production bundle can move its large engines to a separate, Brotli-backed
+// origin by setting this map before game.js loads. Local development keeps the
+// relative paths below.
+const GX_ENGINE_URLS = window.GX_ENGINE_URLS || {};
+
 // Which engine to run, from the URL: ?game=generals -> base Generals
 // (GeneralsX.js/.wasm), anything else -> Zero Hour (GeneralsXZH.js/.wasm).
 function gxEngineName() {
   const game = new URLSearchParams(location.search).get('game');
   return game === 'generals' ? 'GeneralsX' : 'GeneralsXZH';
+}
+
+function gxEngineWasmUrl(engineName) {
+  return GX_ENGINE_URLS[engineName] || engineName + '.wasm';
+}
+
+function gxHectorWsUrl() {
+  return window.gxHectorWsUrl || 'wss://hector.dos.zone/ws';
+}
+
+async function gxInstantiateProtectedWasm(engineName, wasmBinary, imports, receiveInstance, buildId) {
+  const guard = await import('hector/' + engineName + '/gc.js?v=' + encodeURIComponent(buildId));
+  const result = await WebAssembly.instantiate(wasmBinary, imports);
+  const instance = result.instance || result;
+  let started = false;
+
+  guard.attachGuard({
+    instance: instance,
+    wsUrl: gxHectorWsUrl(),
+    onFrame: (frame) => {
+      if (!started && frame.type === 'init') {
+        started = true;
+        receiveInstance(instance, result.module);
+      }
+    },
+    onError: (error) => console.error('[hector]', error),
+  });
 }
 
 // UI language from the URL (?lang=ru keeps the Russian localization override
@@ -43,7 +75,7 @@ async function gxPreloadEngine(onProgress) {
   } catch {}
   window.gxEngine.buildId = buildId;
 
-  const resp = await fetch(gxEngineName() + '.wasm?v=' + buildId);
+  const resp = await fetch(gxEngineWasmUrl(gxEngineName()) + '?v=' + buildId);
   // GeneralsX @feature Lolendor 22/07/2026 Localize launch-screen engine errors.
   if (!resp.ok) throw new Error(window.gxI18n.t('error.engineHttp', { status: resp.status }));
   const total = parseInt(resp.headers.get('Content-Length') || '0') || 0;
@@ -141,7 +173,7 @@ async function gxStartGame() {
   return new Promise((resolve, reject) => {
     const canvas = document.getElementById('canvas');
 
-    window.Module = {
+    const moduleConfig = {
       canvas: canvas,
       arguments: gxGameArguments(),
       // Instantiate from the pre-downloaded binary — no wasm fetch here.
@@ -175,6 +207,20 @@ async function gxStartGame() {
         gxOnEngineExit();
       },
     };
+
+    // The protection script adds the guarded WASM and per-engine Hector client
+    // into dist/, then enables this path. The callback remains deliberately
+    // blocked until the server supplies the first valid guard frame.
+    if (window.gxHectorEnabled) {
+      const engineName = gxEngineName();
+      moduleConfig.instantiateWasm = (imports, receiveInstance) => {
+        gxInstantiateProtectedWasm(engineName, wasmBinary, imports, receiveInstance, buildId)
+          .catch(reject);
+        return {};
+      };
+    }
+
+    window.Module = moduleConfig;
 
     const s = document.createElement('script');
     s.src = gxEngineName() + '.js?v=' + buildId;

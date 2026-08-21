@@ -62,6 +62,10 @@ add_link_options(
     "SHELL:-s ENVIRONMENT=web,worker"
     # The wasm is served next to the page by the Go server.
     "SHELL:-s EXPORTED_RUNTIME_METHODS=ccall,cwrap,callMain"
+    # Hector reserves the guarded memory range through sbrk before main starts.
+    # Keep the export in every release module; the generated name is resolved
+    # from the Emscripten glue by the protection pipeline.
+    "SHELL:-s EXPORTED_FUNCTIONS=['_sbrk']"
 )
 
 if(RTS_BUILD_OPTION_DEBUG)

@@ -111,4 +111,7 @@ web/shell/node_modules/
 web/.pack-cache/
 web/.venv/
 web/gamedata
+web/dist/hector/
+web/dist/hector-config.js
+web/dist/deployment-config.js
 scripts/deploy-bundle-gpx.sh

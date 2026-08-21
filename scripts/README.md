@@ -63,6 +63,12 @@ Utilities for large-scale code refactoring and fixes:
 - `run-bundled-game.sh` - Test bundled binary after deployment
 - `collect-flatpak-vulkan-wsi-report.sh` - Collect reproducible Flatpak Vulkan/XCB diagnostics for upstream runtime issues
 
+### `web/` - Browser Build and Publication
+
+- `make-dist.sh` - Assemble the static browser shell and Emscripten engines
+- `apply-hector-protection.sh` - Add Hector guards to a completed `web/dist/` for local testing or release
+- `deploy-bundle-dz.sh` - Build, guard and publish the browser shell and Brotli-compressed binary payloads
+
 ### `legacy/` - Deprecated & Compatibility
 
 #### `legacy/compat/` - Old Scripts
