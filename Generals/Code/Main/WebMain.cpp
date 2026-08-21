@@ -551,10 +551,17 @@ int main(int argc, char* argv[])
 	// videos, so force -nologo: a stale OPFS deployment may still contain the
 	// intro movies and would play them otherwise.
 	{
+		static char programName[] = "GeneralsX";
 		static char nologoFlag[] = "-nologo";
 		static char* argvNoLogo[64];
+		// GeneralsX @bugfix caiiiycuk 21/08/2026 Emscripten's PROXY_TO_PTHREAD
+		// entry wrapper calls main() with argc == 0. CommandLine deliberately
+		// skips argv[0], so reserve it for the executable name before appending
+		// -nologo; otherwise the forced flag is never parsed.
 		int n = 0;
-		for (int i = 0; i < __argc && n < 62; ++i)
+		argvNoLogo[n++] = (__argc > 0 && __argv != nullptr && __argv[0] != nullptr)
+			? __argv[0] : programName;
+		for (int i = 1; i < __argc && n < 62; ++i)
 			argvNoLogo[n++] = __argv[i];
 		argvNoLogo[n++] = nologoFlag;
 		argvNoLogo[n] = nullptr;

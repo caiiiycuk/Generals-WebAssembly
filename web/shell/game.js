@@ -69,6 +69,12 @@ function gxGameArguments() {
   const p = new URLSearchParams(location.search);
   const raw = p.get('args');
   const args = raw ? raw.split(' ').filter(Boolean) : [];
+  // GeneralsX @bugfix caiiiycuk 21/08/2026 Pass -nologo in the module's
+  // original argv as well as WebMain.cpp's native fallback. This prevents a
+  // stale browser engine cache from entering the startup-movie state.
+  if (!args.some((arg) => arg.toLowerCase() === '-nologo' || arg.toLowerCase() === '--nologo')) {
+    args.push('-nologo');
+  }
   // FPS limit from the URL (?fps=60) -> engine -fps. An explicit -fps in
   // ?args= wins.
   if (!args.includes('-fps')) {
