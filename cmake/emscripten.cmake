@@ -43,11 +43,12 @@ add_link_options(
     # Main loop runs blocking on a worker; sync OPFS + usleep() become legal.
     "SHELL:-s PROXY_TO_PTHREAD"
     "SHELL:-s PTHREAD_POOL_SIZE=8"
-    # Memory: assets stay in OPFS (not in the heap); the engine itself wants
-    # several hundred MB. wasm32 caps at 4GB.
+    # GeneralsX @tweak caiiiycuk 25/08/2026 Start at the verified 512 MiB
+    # baseline and allow bounded growth for demanding missions. Assets stay in
+    # OPFS and do not consume this linear memory.
     "SHELL:-s ALLOW_MEMORY_GROWTH=1"
-    "SHELL:-s INITIAL_MEMORY=768MB"
-    "SHELL:-s MAXIMUM_MEMORY=4GB"
+    "SHELL:-s INITIAL_MEMORY=512MB"
+    "SHELL:-s MAXIMUM_MEMORY=1GB"
     "SHELL:-s STACK_SIZE=4MB"
     # Modern FS: required for the OPFS backend (wasmfs_create_opfs_backend).
     "SHELL:-s WASMFS"
