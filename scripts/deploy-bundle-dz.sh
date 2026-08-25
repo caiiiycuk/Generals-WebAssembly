@@ -28,7 +28,6 @@ case "$DEPLOY_SLUG" in
     *[!A-Za-z0-9._-]*|'') echo "ERROR: DEPLOY_SLUG contains unsupported characters" >&2; exit 1 ;;
 esac
 
-ENDPOINT_URL="https://storage.yandexcloud.net"
 SITE_PREFIX="https://dos.zone/$DEPLOY_SLUG/v$VERSION"
 BINARY_PREFIX="https://br.cdn.dos.zone/$DEPLOY_SLUG/v$VERSION"
 BINARY_STAGE="$(mktemp -d)"
@@ -67,23 +66,31 @@ while IFS= read -r -d '' file; do
     install -d "$(dirname "$staged")"
     brotli --force --best --output="$staged" "$file"
 
-    if [[ "$relative" == *.wasm ]]; then
-        content_type="application/wasm"
-    else
-        content_type="application/octet-stream"
-    fi
-    aws s3 cp "$staged" "s3://br-bundles/$DEPLOY_SLUG/v$VERSION/$relative" \
-        --endpoint-url="$ENDPOINT_URL" \
-        --acl public-read \
-        --content-type="$content_type" \
-        --content-encoding=br
 done < <(find "$DIST_DIR" -type f \( -name '*.wasm' -o -name '*.data' \) -print0)
 
+echo "==> Publishing Brotli payloads"
+rclone copy "$BINARY_STAGE" "br-bundles:68bbc47d0de7-br-bundles/$DEPLOY_SLUG/v$VERSION" \
+    --s3-acl public-read \
+    --metadata-set content-encoding=br \
+    --size-only \
+    --transfers 32 \
+    --checkers 32 \
+    --fast-list \
+    --stats 30s \
+    --stats-one-line \
+    --stats-log-level NOTICE
+
 echo "==> Publishing shell"
-aws s3 sync "$DIST_DIR" "s3://doszone-uploads/$DEPLOY_SLUG/v$VERSION" \
-    --endpoint-url="$ENDPOINT_URL" \
-    --acl public-read \
+rclone copy "$DIST_DIR" "sec-dos-zone:68bbc47d0de7-sec-dos-zone/$DEPLOY_SLUG/v$VERSION" \
+    --s3-acl public-read \
     --exclude '*.wasm' \
-    --exclude '*.data'
+    --exclude '*.data' \
+    --size-only \
+    --transfers 32 \
+    --checkers 32 \
+    --fast-list \
+    --stats 30s \
+    --stats-one-line \
+    --stats-log-level NOTICE
 
 echo "deployment: $SITE_PREFIX/"
