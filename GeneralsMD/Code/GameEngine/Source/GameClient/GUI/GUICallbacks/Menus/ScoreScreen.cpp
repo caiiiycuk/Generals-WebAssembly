@@ -731,6 +731,18 @@ void PlayMovieAndBlock(AsciiString movieTitle)
 	// TheSuperHackers @bugfix Originally this movie render loop stopped rendering when the game window was inactive.
 	// This either skipped the movie or caused decompression artifacts. Now the video just keeps playing until it done.
 
+	// GeneralsX @bugfix caiiiycuk 25/08/2026 Web score screens no longer create
+	// this legacy 800x600 black window for every completed mission. Create it
+	// only when a final-victory movie actually needs a rendering surface.
+	if (!s_blankLayout)
+	{
+		s_blankLayout = TheWindowManager->winCreateLayout("Menus/BlankWindow.wnd");
+		DEBUG_ASSERTCRASH(s_blankLayout, ("We Couldn't Load Menus/BlankWindow.wnd"));
+		s_blankLayout->hide(FALSE);
+		s_blankLayout->bringForward();
+		s_blankLayout->getFirstWindow()->winClearStatus(WIN_STATUS_IMAGE);
+	}
+
 	GameWindow *movieWindow = s_blankLayout->getFirstWindow();
 	TheWritableGlobalData->m_loadScreenRender = TRUE;
 	while (videoStream->frameIndex() < videoStream->frameCount() - 1)
@@ -788,11 +800,16 @@ void initSinglePlayer()
 	TheCampaignManager->setGameDifficulty(TheScriptEngine->getGlobalDifficulty());
 	grabSinglePlayerInfo();
 	s_needToFinishSinglePlayerInit = TRUE;
+	// GeneralsX @bugfix caiiiycuk 25/08/2026 On web this fixed-size legacy
+	// window covered only part of a resized canvas and could remain over the
+	// score screen. PlayMovieAndBlock creates it lazily if a movie needs it.
+#ifndef __EMSCRIPTEN__
 	s_blankLayout = TheWindowManager->winCreateLayout("Menus/BlankWindow.wnd");
 	DEBUG_ASSERTCRASH(s_blankLayout,("We Couldn't Load Menus/BlankWindow.wnd"));
 	s_blankLayout->hide(FALSE);
 	s_blankLayout->bringForward();
 	s_blankLayout->getFirstWindow()->winClearStatus(WIN_STATUS_IMAGE);
+#endif
 }
 
 void displayChallengeWinLoss( const Image *imageGeneral, const UnicodeString strHeader, const UnicodeString strRemarks )
