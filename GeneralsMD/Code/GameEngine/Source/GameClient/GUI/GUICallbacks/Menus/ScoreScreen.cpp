@@ -1008,7 +1008,15 @@ void finishSinglePlayerInit()
 	// need to do this here
 	if ( TheCampaignManager->getCurrentCampaign()
 	 && !TheCampaignManager->getCurrentCampaign()->isChallengeCampaign())
+	{
 		TheTransitionHandler->setGroup("ScoreScreenShow");
+#ifdef __EMSCRIPTEN__
+		// GeneralsX @bugfix caiiiycuk 25/08/2026 The web mission-exit path can
+		// leave ScoreScreenShow on its initial frame, hiding all result widgets.
+		// Skip this cosmetic animation so its populated windows become visible.
+		TheTransitionHandler->remove("ScoreScreenShow", TRUE);
+#endif
+	}
 }
 
 /** Special Init path for making this a single player replay Score Screen */
