@@ -194,7 +194,7 @@ var IDBFSStorage;
 })(IDBFSStorage || (IDBFSStorage = {}));
 var CloudSDK;
 (function (CloudSDK) {
-    const v8Endpoint = "https://d5dn8hh4ivlobv6682ep.apigw.yandexcloud.net";
+    const v8Endpoint = "https://cloud.dos.zone";
     const storageEndpoint = "https://storage.yandexcloud.net/doszone-uploads/personal-v2/cloud";
     const presignPut = v8Endpoint + "/presign-put";
     async function resolveToken(token) {
